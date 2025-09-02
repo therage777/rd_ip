@@ -70,13 +70,17 @@ function validPort($p)
 function logFirewall($data)
 {
     $sql = "INSERT INTO firewall_logs
-            (action,target_ip,target_port,comment,actor_user_id,actor_name,actor_ip,user_agent,status,error_msg)
-            VALUES (:action,:target_ip,:target_port,:comment,:actor_user_id,:actor_name,:actor_ip,:user_agent,:status,:error_msg)";
+            (action,target_ip,target_port,comment,target_server,target_servers,target_group,target_groups,actor_user_id,actor_name,actor_ip,user_agent,status,error_msg)
+            VALUES (:action,:target_ip,:target_port,:comment,:target_server,:target_servers,:target_group,:target_groups,:actor_user_id,:actor_name,:actor_ip,:user_agent,:status,:error_msg)";
     pdo()->prepare($sql)->execute([
         ':action' => $data['action'],
         ':target_ip' => isset($data['ip']) ? $data['ip'] : null,
         ':target_port' => isset($data['port']) ? $data['port'] : null,
         ':comment' => isset($data['comment']) ? $data['comment'] : null,
+        ':target_server' => isset($data['target_server']) ? $data['target_server'] : null,
+        ':target_servers' => isset($data['target_servers']) ? $data['target_servers'] : null,
+        ':target_group' => isset($data['target_group']) ? $data['target_group'] : null,
+        ':target_groups' => isset($data['target_groups']) ? $data['target_groups'] : null,
         ':actor_user_id' => isset($data['uid']) ? (int)$data['uid'] : null,
         ':actor_name' => isset($data['uname']) ? $data['uname'] : null,
         ':actor_ip' => actorIp(),
