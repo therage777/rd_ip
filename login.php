@@ -266,7 +266,7 @@ $csrfToken = generateCSRFToken();
         </div>
         
         <?php if ($error): ?>
-        <div class="error-message">
+        <div class="error-message" role="alert" aria-live="assertive">
             <svg fill="currentColor" viewBox="0 0 20 20">
                 <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
             </svg>
@@ -286,21 +286,31 @@ $csrfToken = generateCSRFToken();
                     class="form-input <?php echo $error ? 'error' : ''; ?>"
                     required 
                     autocomplete="username"
-                    <?php echo $blocked ? 'disabled' : ''; ?>
+                    placeholder="관리자 아이디"
+                    <?php echo $blocked ? 'disabled' : 'autofocus'; ?>
+                    value="<?php echo isset($username) ? htmlspecialchars($username) : '' ?>"
                 >
             </div>
             
             <div class="form-group">
                 <label class="form-label" for="password">비밀번호</label>
-                <input 
-                    type="password" 
-                    id="password" 
-                    name="password" 
-                    class="form-input <?php echo $error ? 'error' : ''; ?>"
-                    required 
-                    autocomplete="current-password"
-                    <?php echo $blocked ? 'disabled' : ''; ?>
-                >
+                <div style="position: relative;">
+                    <input 
+                        type="password" 
+                        id="password" 
+                        name="password" 
+                        class="form-input <?php echo $error ? 'error' : ''; ?>"
+                        required 
+                        autocomplete="current-password"
+                        <?php echo $blocked ? 'disabled' : ''; ?>
+                        placeholder="비밀번호"
+                        aria-describedby="password-hint"
+                    >
+                    <button type="button" id="toggle-password" aria-label="비밀번호 표시" style="position:absolute; right:10px; top:50%; transform:translateY(-50%); background:transparent; border:none; color:#667eea; font-weight:600; cursor:pointer;">
+                        보기
+                    </button>
+                </div>
+                <div id="password-hint" style="margin-top:8px; font-size:12px; color:#718096;"></div>
             </div>
             
             <button type="submit" class="btn-login" <?php echo $blocked ? 'disabled' : ''; ?>>
@@ -318,5 +328,38 @@ $csrfToken = generateCSRFToken();
             </div>
         </div>
     </div>
+<script>
+// 비밀번호 보기/숨기기 토글 및 Caps Lock 안내
+(function() {
+  const pwdInput = document.getElementById('password');
+  const toggleBtn = document.getElementById('toggle-password');
+  const hint = document.getElementById('password-hint');
+  if (!pwdInput || !toggleBtn) return;
+
+  let isVisible = false;
+  toggleBtn.addEventListener('click', function () {
+    isVisible = !isVisible;
+    pwdInput.type = isVisible ? 'text' : 'password';
+    toggleBtn.textContent = isVisible ? '숨기기' : '보기';
+    toggleBtn.setAttribute('aria-label', isVisible ? '비밀번호 숨기기' : '비밀번호 표시');
+  });
+
+  function updateCapsLock(e) {
+    try {
+      const on = e.getModifierState && e.getModifierState('CapsLock');
+      if (on) {
+        hint.textContent = 'Caps Lock이 켜져 있습니다.';
+        hint.style.color = '#c53030';
+      } else {
+        hint.textContent = '';
+        hint.style.color = '#718096';
+      }
+    } catch (_) {}
+  }
+
+  pwdInput.addEventListener('keyup', updateCapsLock);
+  pwdInput.addEventListener('keydown', updateCapsLock);
+})();
+</script>
 </body>
 </html>
