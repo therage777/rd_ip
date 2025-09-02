@@ -429,6 +429,56 @@ $stats = $pdo->query("
         <!-- Alert -->
         <div id="alert" class="alert"></div>
         
+        <!-- Server/Group Target Selection -->
+        <div class="card" style="margin-bottom: 20px;">
+            <div class="card-header">
+                <h3 class="card-title">🎯 타겟 서버/그룹 선택</h3>
+                <span class="badge badge-ip">선택적 적용</span>
+            </div>
+            <div class="card-body">
+                <div style="display: grid; grid-template-columns: 1fr 2fr 1fr; gap: 20px;">
+                    <div>
+                        <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #4a5568;">적용 대상</label>
+                        <select id="target-type" class="form-input" onchange="updateTargetOptions()">
+                            <option value="all">전체 서버 (기본)</option>
+                            <option value="server">특정 서버</option>
+                            <option value="servers">여러 서버</option>
+                            <option value="group">서버 그룹</option>
+                            <option value="groups">여러 그룹</option>
+                        </select>
+                    </div>
+                    <div>
+                        <div id="target-server-container" style="display: none;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #4a5568;">서버 ID</label>
+                            <input type="text" id="target-server" class="form-input" placeholder="예: web01" oninput="updateTargetDisplay()" />
+                        </div>
+                        <div id="target-servers-container" style="display: none;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #4a5568;">서버 ID 목록 (쉼표 구분)</label>
+                            <input type="text" id="target-servers" class="form-input" placeholder="예: web01,web02,db01" oninput="updateTargetDisplay()" />
+                        </div>
+                        <div id="target-group-container" style="display: none;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #4a5568;">그룹 이름</label>
+                            <input type="text" id="target-group" class="form-input" placeholder="예: seoul" oninput="updateTargetDisplay()" />
+                        </div>
+                        <div id="target-groups-container" style="display: none;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #4a5568;">그룹 이름 목록 (쉼표 구분)</label>
+                            <input type="text" id="target-groups" class="form-input" placeholder="예: seoul,edge" oninput="updateTargetDisplay()" />
+                        </div>
+                    </div>
+                    <div>
+                        <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #4a5568;">현재 선택</label>
+                        <div id="target-display" style="padding: 10px; background: #f7fafc; border-radius: 8px; border: 2px solid #e2e8f0; font-family: monospace; font-size: 14px; min-height: 40px; display: flex; align-items: center;">전체 서버</div>
+                    </div>
+                </div>
+                <div style="margin-top: 15px; padding: 12px; background: #e6fffa; border-radius: 8px; border: 1px solid #81e6d9;">
+                    <p style="margin: 0; color: #234e52; font-size: 13px;">
+                        <strong>💡 참고:</strong> 타겟을 지정하지 않으면 모든 서버에 적용됩니다. 
+                        각 서버의 SERVER_ID와 SERVER_GROUPS는 환경변수 또는 /etc/redis-fw-agent.conf에서 설정됩니다.
+                    </p>
+                </div>
+            </div>
+        </div>
+        
         <!-- Stats -->
         <div class="stats-grid">
             <div class="stat-card">
@@ -667,6 +717,100 @@ $stats = $pdo->query("
         const API_TOKEN = '<?php echo API_TOKEN; ?>';
         const CSRF_TOKEN = '<?php echo $csrfToken; ?>';
         
+        function updateTargetOptions() {
+            const targetType = document.getElementById('target-type').value;
+            const containers = [
+                'target-server-container',
+                'target-servers-container', 
+                'target-group-container',
+                'target-groups-container'
+            ];
+            
+            // Hide all containers
+            containers.forEach(id => {
+                document.getElementById(id).style.display = 'none';
+            });
+            
+            // Show relevant container
+            switch(targetType) {
+                case 'server':
+                    document.getElementById('target-server-container').style.display = 'block';
+                    break;
+                case 'servers':
+                    document.getElementById('target-servers-container').style.display = 'block';
+                    break;
+                case 'group':
+                    document.getElementById('target-group-container').style.display = 'block';
+                    break;
+                case 'groups':
+                    document.getElementById('target-groups-container').style.display = 'block';
+                    break;
+            }
+            
+            updateTargetDisplay();
+        }
+        
+        function updateTargetDisplay() {
+            const targetType = document.getElementById('target-type').value;
+            const targetDisplay = document.getElementById('target-display');
+            
+            switch(targetType) {
+                case 'all':
+                    targetDisplay.textContent = '전체 서버';
+                    break;
+                case 'server':
+                    const server = document.getElementById('target-server').value.trim();
+                    targetDisplay.textContent = server ? `@server=${server}` : '서버 ID 입력 필요';
+                    break;
+                case 'servers':
+                    const servers = document.getElementById('target-servers').value.trim();
+                    targetDisplay.textContent = servers ? `@servers=${servers}` : '서버 ID 목록 입력 필요';
+                    break;
+                case 'group':
+                    const group = document.getElementById('target-group').value.trim();
+                    targetDisplay.textContent = group ? `@group=${group}` : '그룹 이름 입력 필요';
+                    break;
+                case 'groups':
+                    const groups = document.getElementById('target-groups').value.trim();
+                    targetDisplay.textContent = groups ? `@groups=${groups}` : '그룹 이름 목록 입력 필요';
+                    break;
+            }
+        }
+        
+        function getTargetParams() {
+            const targetType = document.getElementById('target-type').value;
+            let targetParams = {};
+            
+            switch(targetType) {
+                case 'server':
+                    const server = document.getElementById('target-server').value.trim();
+                    if (server) {
+                        targetParams.target_server = server;
+                    }
+                    break;
+                case 'servers':
+                    const servers = document.getElementById('target-servers').value.trim();
+                    if (servers) {
+                        targetParams.target_servers = servers;
+                    }
+                    break;
+                case 'group':
+                    const group = document.getElementById('target-group').value.trim();
+                    if (group) {
+                        targetParams.target_group = group;
+                    }
+                    break;
+                case 'groups':
+                    const groups = document.getElementById('target-groups').value.trim();
+                    if (groups) {
+                        targetParams.target_groups = groups;
+                    }
+                    break;
+            }
+            
+            return targetParams;
+        }
+        
         function showLoading() {
             document.getElementById('loading').classList.add('active');
         }
@@ -691,6 +835,12 @@ $stats = $pdo->query("
             const formData = new FormData();
             formData.append('token', API_TOKEN);
             formData.append('csrf_token', CSRF_TOKEN);
+            
+            // Add target parameters
+            const targetParams = getTargetParams();
+            for (const key in targetParams) {
+                formData.append(key, targetParams[key]);
+            }
             
             for (const key in data) {
                 formData.append(key, data[key]);

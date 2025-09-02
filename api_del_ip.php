@@ -11,6 +11,12 @@ $comment = isset($_POST['comment']) ? trim($_POST['comment']) : '';
 $uid = $admin['id'];
 $uname = $admin['name'];
 
+// Target parameters for scope filtering
+$target_server = isset($_POST['target_server']) ? trim($_POST['target_server']) : '';
+$target_servers = isset($_POST['target_servers']) ? trim($_POST['target_servers']) : '';
+$target_group = isset($_POST['target_group']) ? trim($_POST['target_group']) : '';
+$target_groups = isset($_POST['target_groups']) ? trim($_POST['target_groups']) : '';
+
 if (!validIp($ip)) {
 	echo json_encode(['ok' => false, 'err' => 'invalid ip']);
 	exit;
@@ -22,7 +28,20 @@ $err = null;
 try {
 	$r = redisClient();
 	$r->srem('fw:blacklist:ips', [$ip]);
-	$r->publish(REDIS_CH, "unban_ip $ip");
+	
+	// Build publish message with scope
+	$msg = "unban_ip $ip";
+	if ($target_server) {
+		$msg .= " @server={$target_server}";
+	} elseif ($target_servers) {
+		$msg .= " @servers={$target_servers}";
+	} elseif ($target_group) {
+		$msg .= " @group={$target_group}";
+	} elseif ($target_groups) {
+		$msg .= " @groups={$target_groups}";
+	}
+	
+	$r->publish(REDIS_CH, $msg);
 } catch (Exception $e) {
 	$ok = false;
 	$err = $e->getMessage();

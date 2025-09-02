@@ -1,7 +1,12 @@
 <?php
 header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/api_auth.php';
+
 require_once __DIR__ . '/lib.php';
+
+if (!defined('REDIS_CH')) {
+	define('REDIS_CH', 'fw:events'); // fallback to agent's default channel
+}
 
 // 로그인한 관리자 정보 가져오기
 $admin = getCurrentAdmin();
@@ -22,6 +27,12 @@ $comment = isset($_POST['comment']) ? trim($_POST['comment']) : '';
 $uid     = $admin['id'];
 $uname   = $admin['name'];
 
+// Target parameters for scope filtering
+$target_server = isset($_POST['target_server']) ? trim($_POST['target_server']) : '';
+$target_servers = isset($_POST['target_servers']) ? trim($_POST['target_servers']) : '';
+$target_group = isset($_POST['target_group']) ? trim($_POST['target_group']) : '';
+$target_groups = isset($_POST['target_groups']) ? trim($_POST['target_groups']) : '';
+
 if (!validIp($ip)) {
 	echo json_encode(['ok' => false, 'err' => 'invalid ip']);
 	exit;
@@ -40,7 +51,20 @@ try {
 	$r = redisClient();
 	if ($r) {
 		$r->sadd('fw:allow:ipports', ["{$ip}:{$port}"]);
-		$r->publish(REDIS_CH, "allow_ipport {$ip} {$port}");
+
+		// Build publish message with scope
+		$msg = "allow_ipport {$ip} {$port}";
+		if ($target_server) {
+			$msg .= " @server={$target_server}";
+		} elseif ($target_servers) {
+			$msg .= " @servers={$target_servers}";
+		} elseif ($target_group) {
+			$msg .= " @group={$target_group}";
+		} elseif ($target_groups) {
+			$msg .= " @groups={$target_groups}";
+		}
+		// publish to channel: " . REDIS_CH
+		$r->publish(REDIS_CH, $msg);
 		$redis_success = true;
 	}
 } catch (Exception $e) {
