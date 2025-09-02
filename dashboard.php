@@ -778,6 +778,10 @@ $stats = $pdo->query("
 							if (is_array($rule_data)) {
 								$targetType = isset($rule_data['target']) ? $rule_data['target'] : 'all';
 								$targetValue = isset($rule_data['target_value']) ? $rule_data['target_value'] : '';
+								
+								// servers, groups 타입도 필터링을 위해 단수형으로 변환
+								if ($targetType === 'servers') $targetType = 'server';
+								if ($targetType === 'groups') $targetType = 'group';
 							} else {
 								$targetType = isset($ruleMetadata[$ipport]['target_type']) ? $ruleMetadata[$ipport]['target_type'] : 'all';
 								$targetValue = isset($ruleMetadata[$ipport]['target_value']) ? $ruleMetadata[$ipport]['target_value'] : '';
@@ -952,6 +956,10 @@ $stats = $pdo->query("
 							if (is_array($rule_data)) {
 								$targetType = isset($rule_data['target']) ? $rule_data['target'] : 'all';
 								$targetValue = isset($rule_data['target_value']) ? $rule_data['target_value'] : '';
+								
+								// servers, groups 타입도 필터링을 위해 단수형으로 변환
+								if ($targetType === 'servers') $targetType = 'server';
+								if ($targetType === 'groups') $targetType = 'group';
 							} else {
 								$targetType = isset($ruleMetadata[$ipport]['target_type']) ? $ruleMetadata[$ipport]['target_type'] : 'all';
 								$targetValue = isset($ruleMetadata[$ipport]['target_value']) ? $ruleMetadata[$ipport]['target_value'] : '';
