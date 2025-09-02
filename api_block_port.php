@@ -1,0 +1,41 @@
+<?php
+header('Content-Type: application/json; charset=utf-8');
+require_once __DIR__ . '/api_auth.php';
+require_once __DIR__ . '/lib.php';
+
+// 로그인한 관리자 정보 가져오기
+$admin = getCurrentAdmin();
+
+$port = isset($_POST['port']) ? (int)$_POST['port'] : 0;
+$comment = isset($_POST['comment']) ? trim($_POST['comment']) : '';
+$uid = $admin['id'];
+$uname = $admin['name'];
+
+if (!validPort($port)) {
+	echo json_encode(['ok' => false, 'err' => 'invalid port']);
+	exit;
+}
+
+$ok = true;
+$err = null;
+
+try {
+	$r = redisClient();
+	$r->sadd('fw:block:ports', [$port]);
+	$r->publish(REDIS_CH, "block_port $port");
+} catch (Exception $e) {
+	$ok = false;
+	$err = $e->getMessage();
+}
+
+logFirewall([
+	'action' => 'block_port',
+	'port' => $port,
+	'comment' => $comment,
+	'uid' => $uid,
+	'uname' => $uname,
+	'status' => $ok ? 'OK' : 'ERR',
+	'error' => $err
+]);
+
+echo json_encode(['ok' => $ok, 'err' => $err]);

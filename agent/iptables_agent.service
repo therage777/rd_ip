@@ -1,0 +1,25 @@
+[Unit]
+Description=IPTables Redis Agent
+After=network.target redis.service
+Wants=redis.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/iptables-agent
+ExecStart=/usr/bin/python3 /opt/iptables-agent/iptables_agent.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# 보안 설정
+PrivateTmp=yes
+NoNewPrivileges=false
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/log
+
+[Install]
+WantedBy=multi-user.target
