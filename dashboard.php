@@ -772,9 +772,8 @@ $stats = $pdo->query("
 							$parts = explode(':', $ipport);
 							$ip = isset($parts[0]) ? $parts[0] : '';
 							$port = isset($parts[1]) ? $parts[1] : '';
-							$comment = isset($ruleMetadata[$ipport]['comment']) ? $ruleMetadata[$ipport]['comment'] : '';
 							
-							// 타겟 정보 추출
+							// 타겟 정보 추출 - 실제 규칙 데이터를 우선 사용
 							if (is_array($rule_data)) {
 								$targetType = isset($rule_data['target']) ? $rule_data['target'] : 'all';
 								$targetValue = isset($rule_data['target_value']) ? $rule_data['target_value'] : '';
@@ -783,23 +782,37 @@ $stats = $pdo->query("
 								if ($targetType === 'servers') $targetType = 'server';
 								if ($targetType === 'groups') $targetType = 'group';
 							} else {
-								$targetType = isset($ruleMetadata[$ipport]['target_type']) ? $ruleMetadata[$ipport]['target_type'] : 'all';
-								$targetValue = isset($ruleMetadata[$ipport]['target_value']) ? $ruleMetadata[$ipport]['target_value'] : '';
+								$targetType = 'all';
+								$targetValue = '';
 							}
 							
-							// 표시용 텍스트 생성
+							// 메모는 규칙 타입에 관계없이 가져오기
+							$comment = isset($ruleMetadata[$ipport]['comment']) ? $ruleMetadata[$ipport]['comment'] : '';
+							
+							// 표시용 텍스트 생성 및 메모 처리
 							$displayText = $ipport;
+							$displayMemo = '';
+							
 							if ($targetType === 'server' && $targetValue) {
 								$displayText .= ' <span style="color: #667eea;">[@' . htmlspecialchars($targetValue) . ']</span>';
+								$displayMemo = $comment; // 서버별 규칙은 메모 표시
 							} elseif ($targetType === 'group' && $targetValue) {
 								$displayText .= ' <span style="color: #48bb78;">[#' . htmlspecialchars($targetValue) . ']</span>';
+								$displayMemo = $comment; // 그룹별 규칙은 메모 표시
+							} else {
+								// 전체 서버 규칙 - 메타데이터에서 SSH 관련 메모만 표시
+								if ($comment && strpos(strtolower($comment), 'ssh') !== false) {
+									$displayMemo = 'ssh';
+								} else {
+									$displayMemo = ''; // 타겟 정보가 포함된 메모는 표시하지 않음
+								}
 							}
 							?>
 							<div class="rule-item" id="allow-<?php echo md5($ipport); ?>" data-target-type="<?php echo htmlspecialchars($targetType); ?>">
 								<div style="flex: 1;">
 									<span class="rule-text"><?php echo $displayText; ?></span>
-									<?php if ($comment): ?>
-										<span class="rule-memo"><?php echo htmlspecialchars($comment); ?></span>
+									<?php if ($displayMemo): ?>
+										<span class="rule-memo"><?php echo htmlspecialchars($displayMemo); ?></span>
 									<?php endif; ?>
 								</div>
 								<button class="btn btn-danger btn-sm" onclick="unallowIPPort('<?php echo htmlspecialchars($ip); ?>', '<?php echo htmlspecialchars($port); ?>', '<?php echo htmlspecialchars($targetType); ?>', '<?php echo htmlspecialchars($targetValue); ?>')">허용 해제</button>
@@ -950,9 +963,8 @@ $stats = $pdo->query("
 							$parts = explode(':', $ipport);
 							$ip = isset($parts[0]) ? $parts[0] : '';
 							$port = isset($parts[1]) ? $parts[1] : '';
-							$comment = isset($ruleMetadata[$ipport]['comment']) ? $ruleMetadata[$ipport]['comment'] : '';
 							
-							// 타겟 정보 추출
+							// 타겟 정보 추출 - 실제 규칙 데이터를 우선 사용
 							if (is_array($rule_data)) {
 								$targetType = isset($rule_data['target']) ? $rule_data['target'] : 'all';
 								$targetValue = isset($rule_data['target_value']) ? $rule_data['target_value'] : '';
@@ -961,23 +973,37 @@ $stats = $pdo->query("
 								if ($targetType === 'servers') $targetType = 'server';
 								if ($targetType === 'groups') $targetType = 'group';
 							} else {
-								$targetType = isset($ruleMetadata[$ipport]['target_type']) ? $ruleMetadata[$ipport]['target_type'] : 'all';
-								$targetValue = isset($ruleMetadata[$ipport]['target_value']) ? $ruleMetadata[$ipport]['target_value'] : '';
+								$targetType = 'all';
+								$targetValue = '';
 							}
 							
-							// 표시용 텍스트 생성
+							// 메모는 규칙 타입에 관계없이 가져오기
+							$comment = isset($ruleMetadata[$ipport]['comment']) ? $ruleMetadata[$ipport]['comment'] : '';
+							
+							// 표시용 텍스트 생성 및 메모 처리
 							$displayText = $ipport;
+							$displayMemo = '';
+							
 							if ($targetType === 'server' && $targetValue) {
 								$displayText .= ' <span style="color: #667eea;">[@' . htmlspecialchars($targetValue) . ']</span>';
+								$displayMemo = $comment; // 서버별 규칙은 메모 표시
 							} elseif ($targetType === 'group' && $targetValue) {
 								$displayText .= ' <span style="color: #48bb78;">[#' . htmlspecialchars($targetValue) . ']</span>';
+								$displayMemo = $comment; // 그룹별 규칙은 메모 표시
+							} else {
+								// 전체 서버 규칙 - 메타데이터에서 SSH 관련 메모만 표시
+								if ($comment && strpos(strtolower($comment), 'ssh') !== false) {
+									$displayMemo = 'ssh';
+								} else {
+									$displayMemo = ''; // 타겟 정보가 포함된 메모는 표시하지 않음
+								}
 							}
 							?>
 							<div class="rule-item" id="ipport-<?php echo md5($ipport); ?>" data-target-type="<?php echo htmlspecialchars($targetType); ?>">
 								<div style="flex: 1;">
 									<span class="rule-text"><?php echo $displayText; ?></span>
-									<?php if ($comment): ?>
-										<span class="rule-memo"><?php echo htmlspecialchars($comment); ?></span>
+									<?php if ($displayMemo): ?>
+										<span class="rule-memo"><?php echo htmlspecialchars($displayMemo); ?></span>
 									<?php endif; ?>
 								</div>
 								<button class="btn btn-danger btn-sm" onclick="unblockIPPort('<?php echo htmlspecialchars($ip); ?>', '<?php echo htmlspecialchars($port); ?>', '<?php echo htmlspecialchars($targetType); ?>', '<?php echo htmlspecialchars($targetValue); ?>')">해제</button>
