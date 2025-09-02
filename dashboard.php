@@ -10,12 +10,74 @@ function getCurrentRules()
 {
 	try {
 		$r = redisClient();
+		
+		// 기본 규칙 (전체 서버)
 		$rules = [
-			'blocked_ips' => $r->smembers('fw:blacklist:ips'),
-			'blocked_ports' => $r->smembers('fw:block:ports'),
-			'blocked_ip_ports' => $r->smembers('fw:block:ipports'),
-			'allowed_ip_ports' => $r->smembers('fw:allow:ipports')
+			'blocked_ips' => [],
+			'blocked_ports' => [],
+			'blocked_ip_ports' => [],
+			'allowed_ip_ports' => []
 		];
+		
+		// 전체 서버 규칙
+		$global_blocked_ips = $r->smembers('fw:blacklist:ips');
+		$global_blocked_ports = $r->smembers('fw:block:ports');
+		$global_blocked_ipports = $r->smembers('fw:block:ipports');
+		$global_allowed_ipports = $r->smembers('fw:allow:ipports');
+		
+		// 규칙에 타겟 정보 추가
+		foreach ($global_blocked_ips as $ip) {
+			$rules['blocked_ips'][] = ['rule' => $ip, 'target' => 'all'];
+		}
+		foreach ($global_blocked_ports as $port) {
+			$rules['blocked_ports'][] = ['rule' => $port, 'target' => 'all'];
+		}
+		foreach ($global_blocked_ipports as $ipport) {
+			$rules['blocked_ip_ports'][] = ['rule' => $ipport, 'target' => 'all'];
+		}
+		foreach ($global_allowed_ipports as $ipport) {
+			$rules['allowed_ip_ports'][] = ['rule' => $ipport, 'target' => 'all'];
+		}
+		
+		// 서버별/그룹별 키 패턴 검색
+		// fw:allow:ipports:server:* 와 fw:allow:ipports:group:* 패턴 검색
+		$server_keys = $r->keys('fw:allow:ipports:server:*');
+		foreach ($server_keys as $key) {
+			$server = str_replace('fw:allow:ipports:server:', '', $key);
+			$ipports = $r->smembers($key);
+			foreach ($ipports as $ipport) {
+				$rules['allowed_ip_ports'][] = ['rule' => $ipport, 'target' => 'server', 'target_value' => $server];
+			}
+		}
+		
+		$group_keys = $r->keys('fw:allow:ipports:group:*');
+		foreach ($group_keys as $key) {
+			$group = str_replace('fw:allow:ipports:group:', '', $key);
+			$ipports = $r->smembers($key);
+			foreach ($ipports as $ipport) {
+				$rules['allowed_ip_ports'][] = ['rule' => $ipport, 'target' => 'group', 'target_value' => $group];
+			}
+		}
+		
+		// fw:block:ipports:server:* 와 fw:block:ipports:group:* 패턴 검색
+		$server_keys = $r->keys('fw:block:ipports:server:*');
+		foreach ($server_keys as $key) {
+			$server = str_replace('fw:block:ipports:server:', '', $key);
+			$ipports = $r->smembers($key);
+			foreach ($ipports as $ipport) {
+				$rules['blocked_ip_ports'][] = ['rule' => $ipport, 'target' => 'server', 'target_value' => $server];
+			}
+		}
+		
+		$group_keys = $r->keys('fw:block:ipports:group:*');
+		foreach ($group_keys as $key) {
+			$group = str_replace('fw:block:ipports:group:', '', $key);
+			$ipports = $r->smembers($key);
+			foreach ($ipports as $ipport) {
+				$rules['blocked_ip_ports'][] = ['rule' => $ipport, 'target' => 'group', 'target_value' => $group];
+			}
+		}
+		
 		return $rules;
 	} catch (Exception $e) {
 		return [
@@ -726,10 +788,11 @@ $stats = $pdo->query("
 								<p>차단된 IP가 없습니다</p>
 							</div>
 						<?php else: ?>
-							<?php foreach ($rules['blocked_ips'] as $ip): ?>
+							<?php foreach ($rules['blocked_ips'] as $rule_data): ?>
 								<?php
+								$ip = $rule_data['rule'];
 								$comment = isset($ruleMetadata[$ip]['comment']) ? $ruleMetadata[$ip]['comment'] : '';
-								$targetType = isset($ruleMetadata[$ip]['target_type']) ? $ruleMetadata[$ip]['target_type'] : 'all';
+								$targetType = $rule_data['target'];
 								?>
 								<div class="rule-item" id="ip-<?php echo md5($ip); ?>" data-target-type="<?php echo htmlspecialchars($targetType); ?>">
 									<div style="flex: 1;">
@@ -775,11 +838,12 @@ $stats = $pdo->query("
 								<p>차단된 포트가 없습니다</p>
 							</div>
 						<?php else: ?>
-							<?php foreach ($rules['blocked_ports'] as $port): ?>
+							<?php foreach ($rules['blocked_ports'] as $rule_data): ?>
 								<?php
+								$port = $rule_data['rule'];
 								$portKey = ':' . $port;
 								$comment = isset($ruleMetadata[$portKey]['comment']) ? $ruleMetadata[$portKey]['comment'] : '';
-								$targetType = isset($ruleMetadata[$portKey]['target_type']) ? $ruleMetadata[$portKey]['target_type'] : 'all';
+								$targetType = $rule_data['target'];
 								?>
 								<div class="rule-item" id="port-<?php echo $port; ?>" data-target-type="<?php echo htmlspecialchars($targetType); ?>">
 									<div style="flex: 1;">
@@ -1224,16 +1288,25 @@ $stats = $pdo->query("
 			return false;
 		}
 
-		function unblockIPPort(ip, port) {
+		function unblockIPPort(ip, port, targetType, targetValue) {
 			if (!confirm(`정말로 ${ip}:${port}의 차단을 해제하시겠습니까?`)) {
 				return;
 			}
 
-			apiCall('api_unblock_ipport.php', {
+			const data = {
 				ip: ip,
 				port: port,
 				comment: '대시보드에서 해제'
-			});
+			};
+			
+			// 타겟 정보 추가
+			if (targetType === 'server' && targetValue) {
+				data.target_server = targetValue;
+			} else if (targetType === 'group' && targetValue) {
+				data.target_group = targetValue;
+			}
+			
+			apiCall('api_unblock_ipport.php', data);
 		}
 
 		function allowIPPort(event) {
@@ -1257,16 +1330,25 @@ $stats = $pdo->query("
 			return false;
 		}
 
-		function unallowIPPort(ip, port) {
+		function unallowIPPort(ip, port, targetType, targetValue) {
 			if (!confirm(`정말로 ${ip}:${port}의 허용을 해제하시겠습니까?`)) {
 				return;
 			}
 
-			apiCall('api_unallow_ipport.php', {
+			const data = {
 				ip: ip,
 				port: port,
 				comment: '대시보드에서 허용 해제'
-			});
+			};
+			
+			// 타겟 정보 추가
+			if (targetType === 'server' && targetValue) {
+				data.target_server = targetValue;
+			} else if (targetType === 'group' && targetValue) {
+				data.target_group = targetValue;
+			}
+			
+			apiCall('api_unallow_ipport.php', data);
 		}
 
 		// 페이지 로드 시 필터 상태 복원

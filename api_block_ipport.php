@@ -32,18 +32,39 @@ $err = null;
 
 try {
 	$r = redisClient();
-	$r->sadd('fw:block:ipports', ["{$ip}:{$port}"]);
+	$ipport = "{$ip}:{$port}";
 	
-	// Build publish message with scope
-	$msg = "block_ipport {$ip} {$port}";
+	// 타겟별로 다른 Redis 키에 저장
 	if ($target_server) {
-		$msg .= " @server={$target_server}";
+		// 특정 서버용 키
+		$r->sadd("fw:block:ipports:server:{$target_server}", [$ipport]);
+		$msg = "block_ipport {$ip} {$port} @server={$target_server}";
 	} elseif ($target_servers) {
-		$msg .= " @servers={$target_servers}";
+		// 여러 서버 - 각각의 서버 키에 추가
+		$servers = array_map('trim', explode(',', $target_servers));
+		foreach ($servers as $server) {
+			if ($server) {
+				$r->sadd("fw:block:ipports:server:{$server}", [$ipport]);
+			}
+		}
+		$msg = "block_ipport {$ip} {$port} @servers={$target_servers}";
 	} elseif ($target_group) {
-		$msg .= " @group={$target_group}";
+		// 특정 그룹용 키
+		$r->sadd("fw:block:ipports:group:{$target_group}", [$ipport]);
+		$msg = "block_ipport {$ip} {$port} @group={$target_group}";
 	} elseif ($target_groups) {
-		$msg .= " @groups={$target_groups}";
+		// 여러 그룹 - 각각의 그룹 키에 추가
+		$groups = array_map('trim', explode(',', $target_groups));
+		foreach ($groups as $group) {
+			if ($group) {
+				$r->sadd("fw:block:ipports:group:{$group}", [$ipport]);
+			}
+		}
+		$msg = "block_ipport {$ip} {$port} @groups={$target_groups}";
+	} else {
+		// 전체 서버 (기본)
+		$r->sadd('fw:block:ipports', [$ipport]);
+		$msg = "block_ipport {$ip} {$port}";
 	}
 	
 	$r->publish(REDIS_CH, $msg);
@@ -57,6 +78,10 @@ logFirewall([
 	'ip' => $ip,
 	'port' => $port,
 	'comment' => $comment,
+	'target_server' => $target_server,
+	'target_servers' => $target_servers,
+	'target_group' => $target_group,
+	'target_groups' => $target_groups,
 	'uid' => $uid,
 	'uname' => $uname,
 	'status' => $ok ? 'OK' : 'ERR',
