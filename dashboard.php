@@ -766,22 +766,39 @@ $stats = $pdo->query("
 							<p>허용된 IP:PORT 조합이 없습니다</p>
 						</div>
 					<?php else: ?>
-						<?php foreach ($rules['allowed_ip_ports'] as $ipport): ?>
+						<?php foreach ($rules['allowed_ip_ports'] as $rule_data): ?>
 							<?php
+							$ipport = is_array($rule_data) ? $rule_data['rule'] : $rule_data;
 							$parts = explode(':', $ipport);
 							$ip = isset($parts[0]) ? $parts[0] : '';
 							$port = isset($parts[1]) ? $parts[1] : '';
 							$comment = isset($ruleMetadata[$ipport]['comment']) ? $ruleMetadata[$ipport]['comment'] : '';
-							$targetType = isset($ruleMetadata[$ipport]['target_type']) ? $ruleMetadata[$ipport]['target_type'] : 'all';
+							
+							// 타겟 정보 추출
+							if (is_array($rule_data)) {
+								$targetType = isset($rule_data['target']) ? $rule_data['target'] : 'all';
+								$targetValue = isset($rule_data['target_value']) ? $rule_data['target_value'] : '';
+							} else {
+								$targetType = isset($ruleMetadata[$ipport]['target_type']) ? $ruleMetadata[$ipport]['target_type'] : 'all';
+								$targetValue = isset($ruleMetadata[$ipport]['target_value']) ? $ruleMetadata[$ipport]['target_value'] : '';
+							}
+							
+							// 표시용 텍스트 생성
+							$displayText = $ipport;
+							if ($targetType === 'server' && $targetValue) {
+								$displayText .= ' <span style="color: #667eea;">[@' . htmlspecialchars($targetValue) . ']</span>';
+							} elseif ($targetType === 'group' && $targetValue) {
+								$displayText .= ' <span style="color: #48bb78;">[#' . htmlspecialchars($targetValue) . ']</span>';
+							}
 							?>
 							<div class="rule-item" id="allow-<?php echo md5($ipport); ?>" data-target-type="<?php echo htmlspecialchars($targetType); ?>">
 								<div style="flex: 1;">
-									<span class="rule-text"><?php echo htmlspecialchars($ipport); ?></span>
+									<span class="rule-text"><?php echo $displayText; ?></span>
 									<?php if ($comment): ?>
 										<span class="rule-memo"><?php echo htmlspecialchars($comment); ?></span>
 									<?php endif; ?>
 								</div>
-								<button class="btn btn-danger btn-sm" onclick="unallowIPPort('<?php echo htmlspecialchars($ip); ?>', '<?php echo htmlspecialchars($port); ?>')">허용 해제</button>
+								<button class="btn btn-danger btn-sm" onclick="unallowIPPort('<?php echo htmlspecialchars($ip); ?>', '<?php echo htmlspecialchars($port); ?>', '<?php echo htmlspecialchars($targetType); ?>', '<?php echo htmlspecialchars($targetValue); ?>')">허용 해제</button>
 							</div>
 						<?php endforeach; ?>
 					<?php endif; ?>
@@ -923,22 +940,39 @@ $stats = $pdo->query("
 							<p>차단된 IP:PORT 조합이 없습니다</p>
 						</div>
 					<?php else: ?>
-						<?php foreach ($rules['blocked_ip_ports'] as $ipport): ?>
+						<?php foreach ($rules['blocked_ip_ports'] as $rule_data): ?>
 							<?php
+							$ipport = is_array($rule_data) ? $rule_data['rule'] : $rule_data;
 							$parts = explode(':', $ipport);
 							$ip = isset($parts[0]) ? $parts[0] : '';
 							$port = isset($parts[1]) ? $parts[1] : '';
 							$comment = isset($ruleMetadata[$ipport]['comment']) ? $ruleMetadata[$ipport]['comment'] : '';
-							$targetType = isset($ruleMetadata[$ipport]['target_type']) ? $ruleMetadata[$ipport]['target_type'] : 'all';
+							
+							// 타겟 정보 추출
+							if (is_array($rule_data)) {
+								$targetType = isset($rule_data['target']) ? $rule_data['target'] : 'all';
+								$targetValue = isset($rule_data['target_value']) ? $rule_data['target_value'] : '';
+							} else {
+								$targetType = isset($ruleMetadata[$ipport]['target_type']) ? $ruleMetadata[$ipport]['target_type'] : 'all';
+								$targetValue = isset($ruleMetadata[$ipport]['target_value']) ? $ruleMetadata[$ipport]['target_value'] : '';
+							}
+							
+							// 표시용 텍스트 생성
+							$displayText = $ipport;
+							if ($targetType === 'server' && $targetValue) {
+								$displayText .= ' <span style="color: #667eea;">[@' . htmlspecialchars($targetValue) . ']</span>';
+							} elseif ($targetType === 'group' && $targetValue) {
+								$displayText .= ' <span style="color: #48bb78;">[#' . htmlspecialchars($targetValue) . ']</span>';
+							}
 							?>
 							<div class="rule-item" id="ipport-<?php echo md5($ipport); ?>" data-target-type="<?php echo htmlspecialchars($targetType); ?>">
 								<div style="flex: 1;">
-									<span class="rule-text"><?php echo htmlspecialchars($ipport); ?></span>
+									<span class="rule-text"><?php echo $displayText; ?></span>
 									<?php if ($comment): ?>
 										<span class="rule-memo"><?php echo htmlspecialchars($comment); ?></span>
 									<?php endif; ?>
 								</div>
-								<button class="btn btn-danger btn-sm" onclick="unblockIPPort('<?php echo htmlspecialchars($ip); ?>', '<?php echo htmlspecialchars($port); ?>')">해제</button>
+								<button class="btn btn-danger btn-sm" onclick="unblockIPPort('<?php echo htmlspecialchars($ip); ?>', '<?php echo htmlspecialchars($port); ?>', '<?php echo htmlspecialchars($targetType); ?>', '<?php echo htmlspecialchars($targetValue); ?>')">해제</button>
 							</div>
 						<?php endforeach; ?>
 					<?php endif; ?>
