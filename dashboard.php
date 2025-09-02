@@ -20,10 +20,10 @@ function getCurrentRules()
 		];
 		
 		// 전체 서버 규칙
-		$global_blocked_ips = $r->smembers('fw:blacklist:ips');
-		$global_blocked_ports = $r->smembers('fw:block:ports');
-		$global_blocked_ipports = $r->smembers('fw:block:ipports');
-		$global_allowed_ipports = $r->smembers('fw:allow:ipports');
+		$global_blocked_ips = $r->smembers('fw:blacklist:ips') ?: [];
+		$global_blocked_ports = $r->smembers('fw:block:ports') ?: [];
+		$global_blocked_ipports = $r->smembers('fw:block:ipports') ?: [];
+		$global_allowed_ipports = $r->smembers('fw:allow:ipports') ?: [];
 		
 		// 규칙에 타겟 정보 추가
 		foreach ($global_blocked_ips as $ip) {
@@ -41,41 +41,73 @@ function getCurrentRules()
 		
 		// 서버별/그룹별 키 패턴 검색
 		// fw:allow:ipports:server:* 와 fw:allow:ipports:group:* 패턴 검색
-		$server_keys = $r->keys('fw:allow:ipports:server:*');
-		foreach ($server_keys as $key) {
-			$server = str_replace('fw:allow:ipports:server:', '', $key);
-			$ipports = $r->smembers($key);
-			foreach ($ipports as $ipport) {
-				$rules['allowed_ip_ports'][] = ['rule' => $ipport, 'target' => 'server', 'target_value' => $server];
+		try {
+			$server_keys = $r->keys('fw:allow:ipports:server:*');
+			if ($server_keys) {
+				foreach ($server_keys as $key) {
+					$server = str_replace('fw:allow:ipports:server:', '', $key);
+					$ipports = $r->smembers($key);
+					if ($ipports) {
+						foreach ($ipports as $ipport) {
+							$rules['allowed_ip_ports'][] = ['rule' => $ipport, 'target' => 'server', 'target_value' => $server];
+						}
+					}
+				}
 			}
+		} catch (Exception $e) {
+			// keys 명령어 실패시 무시
 		}
 		
-		$group_keys = $r->keys('fw:allow:ipports:group:*');
-		foreach ($group_keys as $key) {
-			$group = str_replace('fw:allow:ipports:group:', '', $key);
-			$ipports = $r->smembers($key);
-			foreach ($ipports as $ipport) {
-				$rules['allowed_ip_ports'][] = ['rule' => $ipport, 'target' => 'group', 'target_value' => $group];
+		try {
+			$group_keys = $r->keys('fw:allow:ipports:group:*');
+			if ($group_keys) {
+				foreach ($group_keys as $key) {
+					$group = str_replace('fw:allow:ipports:group:', '', $key);
+					$ipports = $r->smembers($key);
+					if ($ipports) {
+						foreach ($ipports as $ipport) {
+							$rules['allowed_ip_ports'][] = ['rule' => $ipport, 'target' => 'group', 'target_value' => $group];
+						}
+					}
+				}
 			}
+		} catch (Exception $e) {
+			// keys 명령어 실패시 무시
 		}
 		
 		// fw:block:ipports:server:* 와 fw:block:ipports:group:* 패턴 검색
-		$server_keys = $r->keys('fw:block:ipports:server:*');
-		foreach ($server_keys as $key) {
-			$server = str_replace('fw:block:ipports:server:', '', $key);
-			$ipports = $r->smembers($key);
-			foreach ($ipports as $ipport) {
-				$rules['blocked_ip_ports'][] = ['rule' => $ipport, 'target' => 'server', 'target_value' => $server];
+		try {
+			$server_keys = $r->keys('fw:block:ipports:server:*');
+			if ($server_keys) {
+				foreach ($server_keys as $key) {
+					$server = str_replace('fw:block:ipports:server:', '', $key);
+					$ipports = $r->smembers($key);
+					if ($ipports) {
+						foreach ($ipports as $ipport) {
+							$rules['blocked_ip_ports'][] = ['rule' => $ipport, 'target' => 'server', 'target_value' => $server];
+						}
+					}
+				}
 			}
+		} catch (Exception $e) {
+			// keys 명령어 실패시 무시
 		}
 		
-		$group_keys = $r->keys('fw:block:ipports:group:*');
-		foreach ($group_keys as $key) {
-			$group = str_replace('fw:block:ipports:group:', '', $key);
-			$ipports = $r->smembers($key);
-			foreach ($ipports as $ipport) {
-				$rules['blocked_ip_ports'][] = ['rule' => $ipport, 'target' => 'group', 'target_value' => $group];
+		try {
+			$group_keys = $r->keys('fw:block:ipports:group:*');
+			if ($group_keys) {
+				foreach ($group_keys as $key) {
+					$group = str_replace('fw:block:ipports:group:', '', $key);
+					$ipports = $r->smembers($key);
+					if ($ipports) {
+						foreach ($ipports as $ipport) {
+							$rules['blocked_ip_ports'][] = ['rule' => $ipport, 'target' => 'group', 'target_value' => $group];
+						}
+					}
+				}
 			}
+		} catch (Exception $e) {
+			// keys 명령어 실패시 무시
 		}
 		
 		return $rules;
