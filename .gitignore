@@ -17,6 +17,8 @@ coverage
 scripts/
 vendor/
 *.md
+!README.md
+!AGENTS.md
 !CONTRIBUTING.md
 *.local
 *.suo
