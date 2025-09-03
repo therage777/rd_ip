@@ -22,7 +22,7 @@ if (!$admin) {
 }
 
 $ip      = isset($_POST['ip'])   ? trim($_POST['ip'])   : '';
-$port    = isset($_POST['port']) ? (int)$_POST['port']  : 0;
+$portRaw = isset($_POST['port']) ? trim((string)$_POST['port']) : '';
 $comment = isset($_POST['comment']) ? trim($_POST['comment']) : '';
 $uid     = $admin['id'];
 $uname   = $admin['name'];
@@ -63,13 +63,38 @@ if ($target_groups !== '') {
     $target_groups = $norm;
 }
 
-if (!validIp($ip)) {
-	echo json_encode(['ok' => false, 'err' => 'invalid ip']);
-	exit;
+// 다중 입력 지원: ip와 port에 콤마(,)로 여러개 입력 가능
+$ips = array_values(array_filter(array_map('trim', explode(',', $ip)), 'strlen'));
+$ports = array_values(array_filter(array_map('trim', explode(',', $portRaw)), 'strlen'));
+
+if (empty($ips)) {
+    echo json_encode(['ok' => false, 'err' => 'invalid ip']);
+    exit;
 }
-if (!validPort($port)) {
-	echo json_encode(['ok' => false, 'err' => 'invalid port']);
-	exit;
+if (empty($ports)) {
+    echo json_encode(['ok' => false, 'err' => 'invalid port']);
+    exit;
+}
+
+// 유효성 검사 (전체가 유효해야 진행)
+$invalidIps = [];
+foreach ($ips as $ipItem) {
+    if (!validIp($ipItem)) $invalidIps[] = $ipItem;
+}
+if (!empty($invalidIps)) {
+    http_response_code(400);
+    echo json_encode(['ok' => false, 'err' => 'invalid ip(s): ' . implode(', ', $invalidIps)]);
+    exit;
+}
+
+$invalidPorts = [];
+foreach ($ports as $pItem) {
+    if (!validPort($pItem)) $invalidPorts[] = $pItem;
+}
+if (!empty($invalidPorts)) {
+    http_response_code(400);
+    echo json_encode(['ok' => false, 'err' => 'invalid port(s): ' . implode(', ', $invalidPorts)]);
+    exit;
 }
 
 $ok = true;
@@ -78,47 +103,52 @@ $redis_success = false;
 
 // Redis 연결 시도 (실패해도 계속 진행)
 try {
-	$r = redisClient();
-	if ($r) {
-		$ipport = "{$ip}:{$port}";
-		
-		// 타겟별로 다른 Redis 키에 저장
-		if ($target_server) {
-			// 특정 서버용 키
-			$r->sadd("fw:allow:ipports:server:{$target_server}", [$ipport]);
-			$msg = "allow_ipport {$ip} {$port} @server={$target_server}";
-		} elseif ($target_servers) {
-			// 여러 서버 - 각각의 서버 키에 추가
-			$servers = array_map('trim', explode(',', $target_servers));
-			foreach ($servers as $server) {
-				if ($server) {
-					$r->sadd("fw:allow:ipports:server:{$server}", [$ipport]);
-				}
-			}
-			$msg = "allow_ipport {$ip} {$port} @servers={$target_servers}";
-		} elseif ($target_group) {
-			// 특정 그룹용 키
-			$r->sadd("fw:allow:ipports:group:{$target_group}", [$ipport]);
-			$msg = "allow_ipport {$ip} {$port} @group={$target_group}";
-		} elseif ($target_groups) {
-			// 여러 그룹 - 각각의 그룹 키에 추가
-			$groups = array_map('trim', explode(',', $target_groups));
-			foreach ($groups as $group) {
-				if ($group) {
-					$r->sadd("fw:allow:ipports:group:{$group}", [$ipport]);
-				}
-			}
-			$msg = "allow_ipport {$ip} {$port} @groups={$target_groups}";
-		} else {
-			// 전체 서버 (기본)
-			$r->sadd('fw:allow:ipports', [$ipport]);
-			$msg = "allow_ipport {$ip} {$port}";
-		}
-		
-		// publish to channel
-		$r->publish(REDIS_CH, $msg);
-		$redis_success = true;
-	}
+    $r = redisClient();
+    if ($r) {
+        // 모든 조합에 대해 처리
+        foreach ($ips as $ipItem) {
+            foreach ($ports as $portItem) {
+                $ipport = "{$ipItem}:{$portItem}";
+
+                if ($target_server) {
+                    // 특정 서버
+                    $r->sadd("fw:allow:ipports:server:{$target_server}", [$ipport]);
+                    $msg = "allow_ipport {$ipItem} {$portItem} @server={$target_server}";
+                } elseif ($target_servers) {
+                    // 여러 서버
+                    $servers = array_map('trim', explode(',', $target_servers));
+                    foreach ($servers as $server) {
+                        if ($server) {
+                            $r->sadd("fw:allow:ipports:server:{$server}", [$ipport]);
+                        }
+                    }
+                    $msg = "allow_ipport {$ipItem} {$portItem} @servers={$target_servers}";
+                } elseif ($target_group) {
+                    // 특정 그룹
+                    $r->sadd("fw:allow:ipports:group:{$target_group}", [$ipport]);
+                    $msg = "allow_ipport {$ipItem} {$portItem} @group={$target_group}";
+                } elseif ($target_groups) {
+                    // 여러 그룹
+                    $groups = array_map('trim', explode(',', $target_groups));
+                    foreach ($groups as $group) {
+                        if ($group) {
+                            $r->sadd("fw:allow:ipports:group:{$group}", [$ipport]);
+                        }
+                    }
+                    $msg = "allow_ipport {$ipItem} {$portItem} @groups={$target_groups}";
+                } else {
+                    // 전체 서버 (기본)
+                    $r->sadd('fw:allow:ipports', [$ipport]);
+                    $msg = "allow_ipport {$ipItem} {$portItem}";
+                }
+
+                // 조합별 이벤트 발행
+                $r->publish(REDIS_CH, $msg);
+            }
+        }
+
+        $redis_success = true;
+    }
 } catch (Exception $e) {
 	// Redis 실패를 경고로만 처리
 	$err = 'Redis 연결 실패 (DB에는 기록됨): ' . substr($e->getMessage(), 0, 100);
@@ -126,20 +156,25 @@ try {
 
 // DB에 기록
 try {
-	logFirewall([
-		'action' => 'allow_ipport',
-		'ip' => $ip,
-		'port' => $port,
-		'comment' => $comment,
-		'target_server' => $target_server,
-		'target_servers' => $target_servers,
-		'target_group' => $target_group,
-		'target_groups' => $target_groups,
-		'uid' => $uid,
-		'uname' => $uname,
-		'status' => $redis_success ? 'OK' : 'ERR',
-		'error' => $redis_success ? null : $err
-	]);
+    // 각 조합을 개별 로그로 기록
+    foreach ($ips as $ipItem) {
+        foreach ($ports as $portItem) {
+            logFirewall([
+                'action' => 'allow_ipport',
+                'ip' => $ipItem,
+                'port' => (int)$portItem,
+                'comment' => $comment,
+                'target_server' => $target_server,
+                'target_servers' => $target_servers,
+                'target_group' => $target_group,
+                'target_groups' => $target_groups,
+                'uid' => $uid,
+                'uname' => $uname,
+                'status' => $redis_success ? 'OK' : 'ERR',
+                'error' => $redis_success ? null : $err
+            ]);
+        }
+    }
 } catch (Exception $e) {
 	$ok = false;
 	$err = 'DB 기록 실패: ' . substr($e->getMessage(), 0, 100);

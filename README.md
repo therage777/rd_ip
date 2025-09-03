@@ -50,6 +50,17 @@ curl -s -b cookie.txt -c cookie.txt \
   -d csrf_token=<CSRF_TOKEN> -d ip=1.2.3.4 -d port=2193 -d comment="FTP allow"
 ```
 
+예시: 여러 IP와 여러 포트 동시 허용(전역)
+```bash
+curl -s -b cookie.txt -c cookie.txt \
+  -X POST https://<host>/api_allow_ipport.php \
+  -d csrf_token=<CSRF_TOKEN> \
+  -d ip="1.1.1.1,2.2.2.2" \
+  -d port="22,3306" \
+  -d comment="VPN IP 다중 허용"
+# 생성되는 조합: 1.1.1.1:22, 1.1.1.1:3306, 2.2.2.2:22, 2.2.2.2:3306
+```
+
 예시: 포트 범위 차단(그룹 한정)
 ```bash
 curl -s -b cookie.txt -c cookie.txt \
@@ -61,7 +72,7 @@ curl -s -b cookie.txt -c cookie.txt \
 - `api_add_ip.php`/`api_del_ip.php`: `ip`(필수), `comment`(선택) + 스코프
 - `api_block_port.php`/`api_unblock_port.php`: `port` 또는 `port` 범위 문자열(필수), `comment`(선택) + 스코프
 - `api_allow_port.php`/`api_unallow_port.php`: `port` 또는 범위(필수), `comment`(선택) + 스코프
-- `api_allow_ipport.php`/`api_unallow_ipport.php`/`api_block_ipport.php`/`api_unblock_ipport.php`: `ip`(필수), `port`(필수), `comment`(선택) + 스코프
+- `api_allow_ipport.php`/`api_unallow_ipport.php`/`api_block_ipport.php`/`api_unblock_ipport.php`: `ip`(필수, 콤마로 여러 개 가능), `port`(필수, 콤마로 여러 개 가능), `comment`(선택) + 스코프
 
 ## 에이전트 동작 요약
 - 로컬 ipset 세트: `fw_black_ips`, `fw_block_ports`, `fw_allow_ports`, `fw_allow_ipports`, `fw_block_ipports`
