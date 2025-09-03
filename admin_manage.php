@@ -4,10 +4,11 @@ requireLogin();
 
 $admin = getCurrentAdmin();
 $csrfToken = generateCSRFToken();
+$isSuper = isSuperAdmin($admin);
 
-// 관리자 목록 가져오기
+// 관리자 목록 가져오기 (슈퍼관리자만 필요)
 $pdo = pdo();
-$admins = $pdo->query("SELECT * FROM admins ORDER BY created_at DESC")->fetchAll();
+$admins = $isSuper ? $pdo->query("SELECT * FROM admins ORDER BY created_at DESC")->fetchAll() : [];
 
 // 관리자 추가 처리
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
@@ -18,6 +19,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     $action = $_POST['action'];
     
     if ($action === 'add_admin') {
+        if (!$isSuper) {
+            http_response_code(403);
+            die('forbidden');
+        }
         $username = trim($_POST['username']);
         $password = $_POST['password'];
         $name = trim($_POST['name']);
@@ -52,6 +57,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             exit;
         }
     } elseif ($action === 'toggle_admin') {
+        if (!$isSuper) {
+            http_response_code(403);
+            die('forbidden');
+        }
         $adminId = (int)$_POST['admin_id'];
         if ($adminId != $_SESSION['admin_id']) { // 자기 자신은 비활성화 못함
             $stmt = $pdo->prepare("UPDATE admins SET is_active = NOT is_active WHERE id = :id");
@@ -60,6 +69,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             auditLog($_SESSION['admin_id'], 'TOGGLE_ADMIN', 'admin', $adminId);
             header('Location: admin_manage.php');
             exit;
+        }
+    } elseif ($action === 'change_password') {
+        // 본인 비번 변경 (일반/슈퍼 모두 허용)
+        $current = isset($_POST['current_password']) ? $_POST['current_password'] : '';
+        $new = isset($_POST['new_password']) ? $_POST['new_password'] : '';
+        $confirm = isset($_POST['confirm_password']) ? $_POST['confirm_password'] : '';
+
+        // 현재 비밀번호 확인
+        $stmt = $pdo->prepare("SELECT password FROM admins WHERE id = :id AND is_active = 1");
+        $stmt->execute([':id' => $_SESSION['admin_id']]);
+        $row = $stmt->fetch();
+        if (!$row || !password_verify($current, $row['password'])) {
+            $error = '현재 비밀번호가 올바르지 않습니다.';
+        } elseif ($new !== $confirm) {
+            $error = '새 비밀번호와 확인 값이 일치하지 않습니다.';
+        } else {
+            $pwErrors = validatePasswordStrength($new);
+            if (!empty($pwErrors)) {
+                $error = implode(', ', $pwErrors);
+            } else {
+                $stmt = $pdo->prepare("UPDATE admins SET password = :pw WHERE id = :id");
+                $stmt->execute([':pw' => password_hash($new, PASSWORD_DEFAULT), ':id' => $_SESSION['admin_id']]);
+                auditLog($_SESSION['admin_id'], 'CHANGE_PASSWORD', 'admin', $_SESSION['admin_id']);
+                header('Location: admin_manage.php?pw_changed=1');
+                exit;
+            }
+        }
+    } elseif ($action === 'reset_password') {
+        // 슈퍼관리자가 임의 관리자 비번 변경
+        if (!$isSuper) {
+            http_response_code(403);
+            die('forbidden');
+        }
+        $targetId = (int)$_POST['admin_id'];
+        $new = isset($_POST['new_password']) ? $_POST['new_password'] : '';
+        $confirm = isset($_POST['confirm_password']) ? $_POST['confirm_password'] : '';
+        if ($new !== $confirm) {
+            $error = '새 비밀번호와 확인 값이 일치하지 않습니다.';
+        } else {
+            $pwErrors = validatePasswordStrength($new);
+            if (!empty($pwErrors)) {
+                $error = implode(', ', $pwErrors);
+            } else {
+                $stmt = $pdo->prepare("UPDATE admins SET password = :pw WHERE id = :id");
+                $stmt->execute([':pw' => password_hash($new, PASSWORD_DEFAULT), ':id' => $targetId]);
+                auditLog($_SESSION['admin_id'], 'RESET_PASSWORD', 'admin', $targetId);
+                header('Location: admin_manage.php?pw_reset=1');
+                exit;
+            }
         }
     }
 }
@@ -303,18 +361,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     
     <div class="container">
         <?php if (isset($_GET['success'])): ?>
-        <div class="alert alert-success">
-            관리자가 성공적으로 추가되었습니다.
-        </div>
+        <div class="alert alert-success">관리자가 성공적으로 추가되었습니다.</div>
         <?php endif; ?>
-        
+        <?php if (isset($_GET['pw_changed'])): ?>
+        <div class="alert alert-success">비밀번호가 변경되었습니다.</div>
+        <?php endif; ?>
+        <?php if (isset($_GET['pw_reset'])): ?>
+        <div class="alert alert-success">비밀번호가 재설정되었습니다.</div>
+        <?php endif; ?>
         <?php if (isset($error)): ?>
-        <div class="alert alert-error">
-            <?php echo htmlspecialchars($error); ?>
-        </div>
+        <div class="alert alert-error"><?php echo htmlspecialchars($error); ?></div>
         <?php endif; ?>
-        
-        <!-- 새 관리자 추가 -->
+
+        <!-- 내 비밀번호 변경 (모든 관리자) -->
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">내 비밀번호 변경</h3>
+            </div>
+            <div class="card-body">
+                <form method="POST" action="">
+                    <input type="hidden" name="csrf_token" value="<?php echo $csrfToken; ?>">
+                    <input type="hidden" name="action" value="change_password">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px;">
+                        <div class="form-group">
+                            <label class="form-label" for="current_password">현재 비밀번호</label>
+                            <input type="password" id="current_password" name="current_password" class="form-input" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="new_password">새 비밀번호</label>
+                            <input type="password" id="new_password" name="new_password" class="form-input" required>
+                            <div class="form-hint">최소 8자, 대소문자, 숫자, 특수문자 포함</div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="confirm_password">새 비밀번호 확인</label>
+                            <input type="password" id="confirm_password" name="confirm_password" class="form-input" required>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary" style="margin-top: 10px;">변경</button>
+                </form>
+            </div>
+        </div>
+
+        <?php if ($isSuper): ?>
+        <!-- 새 관리자 추가 (슈퍼관리자만) -->
         <div class="card">
             <div class="card-header">
                 <h3 class="card-title">새 관리자 추가</h3>
@@ -357,8 +446,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 </form>
             </div>
         </div>
-        
-        <!-- 관리자 목록 -->
+
+        <!-- 관리자 목록 (슈퍼관리자만) -->
         <div class="card">
             <div class="card-header">
                 <h3 class="card-title">관리자 목록</h3>
@@ -396,9 +485,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                                 </div>
                             </td>
                             <td>
-                                <?php 
-                                echo $adm['last_login'] ? date('Y-m-d H:i', strtotime($adm['last_login'])) : '-';
-                                ?>
+                                <?php echo $adm['last_login'] ? date('Y-m-d H:i', strtotime($adm['last_login'])) : '-'; ?>
                             </td>
                             <td>
                                 <?php if ($adm['is_active']): ?>
@@ -409,17 +496,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                             </td>
                             <td>
                                 <?php if ($adm['id'] != $_SESSION['admin_id']): ?>
-                                <form method="POST" action="" style="display: inline;">
+                                <form method="POST" action="" style="display: inline; margin-right: 8px;">
                                     <input type="hidden" name="csrf_token" value="<?php echo $csrfToken; ?>">
                                     <input type="hidden" name="action" value="toggle_admin">
                                     <input type="hidden" name="admin_id" value="<?php echo $adm['id']; ?>">
-                                    <button type="submit" class="btn btn-sm <?php echo $adm['is_active'] ? 'btn-danger' : 'btn-success'; ?>">
-                                        <?php echo $adm['is_active'] ? '비활성화' : '활성화'; ?>
-                                    </button>
+                                    <button type="submit" class="btn btn-sm <?php echo $adm['is_active'] ? 'btn-danger' : 'btn-success'; ?>"><?php echo $adm['is_active'] ? '비활성화' : '활성화'; ?></button>
                                 </form>
                                 <?php else: ?>
-                                <span style="color: #a0aec0; font-size: 12px;">현재 사용자</span>
+                                <span style="color: #a0aec0; font-size: 12px; margin-right:8px;">현재 사용자</span>
                                 <?php endif; ?>
+
+                                <!-- 비밀번호 재설정 (슈퍼관리자 권한) -->
+                                <form method="POST" action="" style="display: inline;">
+                                    <input type="hidden" name="csrf_token" value="<?php echo $csrfToken; ?>">
+                                    <input type="hidden" name="action" value="reset_password">
+                                    <input type="hidden" name="admin_id" value="<?php echo $adm['id']; ?>">
+                                    <input type="password" name="new_password" placeholder="새 비번" class="form-input" style="width: 160px; display:inline-block; vertical-align: middle;">
+                                    <input type="password" name="confirm_password" placeholder="확인" class="form-input" style="width: 140px; display:inline-block; vertical-align: middle;">
+                                    <button type="submit" class="btn btn-sm btn-primary" style="vertical-align: middle;">비번 변경</button>
+                                </form>
                             </td>
                         </tr>
                         <?php endforeach; ?>
@@ -427,6 +522,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 </table>
             </div>
         </div>
+        <?php endif; ?>
     </div>
 </body>
 </html>
