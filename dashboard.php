@@ -271,13 +271,13 @@ function getRuleOwners()
 {
     $pdo = pdo();
     $owners = [
-        'ipports' => [], // key: "IP:PORT" => actor_user_id
-        'ips' => [],     // key: "IP" => actor_user_id
-        'ports' => [],   // key: "<n>" or "<from>-<to>" => actor_user_id
+        'ipports' => [], // key: "IP:PORT" => ['id'=>int,'name'=>string]
+        'ips' => [],     // key: "IP" => ['id'=>int,'name'=>string]
+        'ports' => [],   // key: "<n>" or "<from>-<to>" => ['id'=>int,'name'=>string]
     ];
 
     // 1) IP:PORT 생성자
-    $sql1 = "SELECT actor_user_id, target_ip, target_port, action, created_at
+    $sql1 = "SELECT actor_user_id, actor_name, target_ip, target_port, action, created_at
              FROM firewall_logs
              WHERE target_ip IS NOT NULL AND target_port IS NOT NULL
                AND action IN ('allow_ipport','block_ipport')
@@ -286,13 +286,13 @@ function getRuleOwners()
         foreach ($pdo->query($sql1) as $row) {
             $key = $row['target_ip'] . ':' . $row['target_port'];
             if (!isset($owners['ipports'][$key])) {
-                $owners['ipports'][$key] = (int)$row['actor_user_id'];
+                $owners['ipports'][$key] = ['id' => (int)$row['actor_user_id'], 'name' => (string)$row['actor_name']];
             }
         }
     } catch (Exception $e) { /* ignore */ }
 
     // 2) IP 생성자 (ban_ip)
-    $sql2 = "SELECT actor_user_id, target_ip, action, created_at
+    $sql2 = "SELECT actor_user_id, actor_name, target_ip, action, created_at
              FROM firewall_logs
              WHERE target_ip IS NOT NULL AND action IN ('ban_ip')
              ORDER BY created_at DESC";
@@ -300,14 +300,14 @@ function getRuleOwners()
         foreach ($pdo->query($sql2) as $row) {
             $key = $row['target_ip'];
             if (!isset($owners['ips'][$key])) {
-                $owners['ips'][$key] = (int)$row['actor_user_id'];
+                $owners['ips'][$key] = ['id' => (int)$row['actor_user_id'], 'name' => (string)$row['actor_name']];
             }
         }
     } catch (Exception $e) { /* ignore */ }
 
     // 3) 포트 생성자 (단일/범위)
     // 우선 단일 포트
-    $sql3a = "SELECT actor_user_id, target_port, action, created_at
+    $sql3a = "SELECT actor_user_id, actor_name, target_port, action, created_at
               FROM firewall_logs
               WHERE target_port IS NOT NULL AND action IN ('allow_port','block_port')
               ORDER BY created_at DESC";
@@ -315,7 +315,7 @@ function getRuleOwners()
         foreach ($pdo->query($sql3a) as $row) {
             $key = (string)((int)$row['target_port']);
             if (!isset($owners['ports'][$key])) {
-                $owners['ports'][$key] = (int)$row['actor_user_id'];
+                $owners['ports'][$key] = ['id' => (int)$row['actor_user_id'], 'name' => (string)$row['actor_name']];
             }
         }
     } catch (Exception $e) { /* ignore */ }
@@ -329,7 +329,7 @@ function getRuleOwners()
         } catch (Exception $ie) { $hasRange = false; }
 
         if ($hasRange) {
-            $sql3b = "SELECT actor_user_id, target_port_from, target_port_to, action, created_at
+            $sql3b = "SELECT actor_user_id, actor_name, target_port_from, target_port_to, action, created_at
                       FROM firewall_logs
                       WHERE target_port_from IS NOT NULL AND target_port_to IS NOT NULL
                         AND action IN ('allow_port','block_port')
@@ -337,7 +337,7 @@ function getRuleOwners()
             foreach ($pdo->query($sql3b) as $row) {
                 $key = ((int)$row['target_port_from']) . '-' . ((int)$row['target_port_to']);
                 if (!isset($owners['ports'][$key])) {
-                    $owners['ports'][$key] = (int)$row['actor_user_id'];
+                    $owners['ports'][$key] = ['id' => (int)$row['actor_user_id'], 'name' => (string)$row['actor_name']];
                 }
             }
         }
@@ -357,11 +357,11 @@ if (!isSuperAdmin($admin)) {
             $rule = is_array($item) ? $item['rule'] : $item;
             $key = (string)$rule;
             if ($type === 'ips') {
-                if (isset($owners['ips'][$key]) && $owners['ips'][$key] === $uid) $out[] = $item;
+                if (isset($owners['ips'][$key]) && $owners['ips'][$key]['id'] === $uid) $out[] = $item;
             } elseif ($type === 'ports') {
-                if (isset($owners['ports'][$key]) && $owners['ports'][$key] === $uid) $out[] = $item;
+                if (isset($owners['ports'][$key]) && $owners['ports'][$key]['id'] === $uid) $out[] = $item;
             } elseif ($type === 'ipports') {
-                if (isset($owners['ipports'][$key]) && $owners['ipports'][$key] === $uid) $out[] = $item;
+                if (isset($owners['ipports'][$key]) && $owners['ipports'][$key]['id'] === $uid) $out[] = $item;
             }
         }
         return $out;
@@ -629,10 +629,10 @@ if (isSuperAdmin($admin)) {
 		}
 
 		/* Lists */
-		.rule-list {
-			max-height: 300px;
-			overflow-y: auto;
-		}
+        .rule-list {
+            max-height: 300px;
+            overflow-y: auto;
+        }
 
 		.rule-item {
 			display: flex;
@@ -647,9 +647,24 @@ if (isSuperAdmin($admin)) {
 			background: #f7fafc;
 		}
 
-		.rule-item:last-child {
-			border-bottom: none;
-		}
+        .rule-item:last-child {
+            border-bottom: none;
+        }
+
+        /* List tools (search + pagination) */
+        .list-tools { display:flex; gap:12px; align-items:center; margin:8px 0 12px 0; }
+        .list-tools .pager { display:flex; gap:8px; align-items:center; }
+        .btn-secondary { background:#edf2f7; color:#2d3748; border:1px solid #e2e8f0; }
+        .btn-secondary:hover { background:#e2e8f0; }
+
+        /* Hide misplaced static empty placeholders; JS will manage dynamic message */
+        .empty-state[id^="empty-"] { display: none !important; }
+
+		/* Clickable rows when checkboxes exist */
+		.rule-item.has-checkbox { cursor: pointer; }
+		.rule-item.has-checkbox button,
+		.rule-item.has-checkbox a,
+		.rule-item.has-checkbox input { cursor: auto; }
 
 		.rule-text {
 			font-family: 'Monaco', 'Courier New', monospace;
@@ -880,10 +895,16 @@ if (isSuperAdmin($admin)) {
 						</select>
 					</div>
 					<div>
-						<div id="target-server-container" style="display: none;">
-							<label style="display: block; margin-bottom: 8px; font-weight: 600; color: #4a5568;">서버 ID</label>
-							<input type="text" id="target-server" class="form-input" placeholder="예: web01" oninput="updateTargetDisplay()" />
-						</div>
+                            <div id="target-server-container" style="display: none;">
+                                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #4a5568;">서버 ID</label>
+                                <input type="text" id="target-server" class="form-input" placeholder="예: web01" oninput="updateTargetDisplay()" list="known-servers" />
+                                <datalist id="known-servers"></datalist>
+                                <div style="display:flex; gap:8px; align-items:center; margin-top:8px;">
+                                    <input type="text" id="new-server-id" class="form-input" placeholder="서버 추가 (ID)" style="flex:1;">
+                                    <button type="button" class="btn btn-primary btn-sm" onclick="addServer()">서버 추가</button>
+                                </div>
+                                <div id="server-tags" style="margin-top:8px; display:flex; gap:6px; flex-wrap:wrap;"></div>
+                            </div>
 						<div id="target-servers-container" style="display: none;">
 							<label style="display: block; margin-bottom: 8px; font-weight: 600; color: #4a5568;">서버 ID 목록 (쉼표 구분)</label>
 							<input type="text" id="target-servers" class="form-input" placeholder="예: web01,web02,db01" oninput="updateTargetDisplay()" />
@@ -913,21 +934,25 @@ if (isSuperAdmin($admin)) {
 
 		<!-- Stats -->
 		<div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">🚫 차단된 IP</div>
+                <div class="stat-value" id="stat-blocked-ips"><?php echo count($rules['blocked_ips']); ?></div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">🔒 차단된 포트</div>
+                <div class="stat-value" id="stat-blocked-ports"><?php echo count($rules['blocked_ports']); ?></div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">❌ 차단된 IP:PORT</div>
+                <div class="stat-value" id="stat-blocked-ipports" style="color: #f56565;">
+                    <?php echo count($rules['blocked_ip_ports']); ?>
+                </div>
+            </div>
 			<div class="stat-card">
-				<div class="stat-label">🚫 차단된 IP</div>
-				<div class="stat-value"><?php echo count($rules['blocked_ips']); ?></div>
-			</div>
-			<div class="stat-card">
-				<div class="stat-label">🔒 차단된 포트</div>
-				<div class="stat-value"><?php echo count($rules['blocked_ports']); ?></div>
-			</div>
-			<div class="stat-card">
-				<div class="stat-label">❌ 차단된 IP:PORT</div>
-				<div class="stat-value" style="color: #f56565;"><?php echo count($rules['blocked_ip_ports']); ?></div>
-			</div>
-			<div class="stat-card">
-				<div class="stat-label">✅ 허용된 IP:PORT</div>
-				<div class="stat-value" style="color: #48bb78;"><?php echo count($rules['allowed_ip_ports']); ?></div>
+                <div class="stat-label">✅ 허용된 IP:PORT</div>
+                <div class="stat-value" id="stat-allowed-ipports" style="color: #48bb78;">
+                    <?php echo count($rules['allowed_ip_ports']); ?>
+                </div>
 			</div>
 			<div class="stat-card">
 				<div class="stat-label">📊 24시간 작업</div>
@@ -943,11 +968,18 @@ if (isSuperAdmin($admin)) {
 
 		<!-- IP:PORT 허용 관리 섹션 (화이트리스트) -->
 		<div class="card" style="margin-bottom: 30px;">
-			<div class="card-header">
-				<h3 class="card-title">✅ IP:PORT 허용 관리 (화이트리스트)</h3>
-				<span class="badge badge-combo" style="background: #c6f6d5; color: #22543d;"><?php echo count($rules['allowed_ip_ports']); ?>개</span>
-			</div>
+                <div class="card-header">
+                    <h3 class="card-title">✅ IP:PORT 허용 관리 (화이트리스트)</h3>
+                    <span class="badge badge-combo" id="badge-allow-ipports" style="background: #c6f6d5; color: #22543d;"><?php echo count($rules['allowed_ip_ports']); ?>개</span>
+                </div>
 			<div class="card-body">
+				<!-- 일괄 작업 툴바 -->
+				<div style="display:flex; gap:10px; align-items:center; margin-bottom:12px;">
+					<label style="display:flex; align-items:center; gap:6px; font-size:14px; color:#4a5568;">
+						<input type="checkbox" id="allow-ipport-select-all" onclick="toggleSelectAll('allow-ipport', this.checked)"> 전체 선택
+					</label>
+					<button class="btn btn-danger btn-sm" onclick="bulkUnallowIPPorts()">선택 허용 해제</button>
+				</div>
 				<!-- 필터링 옵션 -->
 				<div class="filter-section">
 					<div class="filter-checkboxes">
@@ -989,7 +1021,22 @@ if (isSuperAdmin($admin)) {
 					<button type="submit" class="btn btn-primary" style="background: #48bb78;">허용 추가</button>
 				</form>
 
-				<div class="rule-list">
+                <div class="list-tools">
+                    <input type="text" class="form-input" id="search-allow-ipports" placeholder="검색 (IP, 포트, 서버ID, 메모)" oninput="setSearch('allow-ipports', this.value)">
+                    <button class="btn btn-secondary btn-sm" onclick="resetSearch('allow-ipports')">검색 초기화</button>
+                    <select class="form-input" style="width:auto;" id="perpage-allow-ipports" onchange="setPerPage('allow-ipports', this.value)">
+                        <option value="10" selected>10개</option>
+                        <option value="20">20개</option>
+                        <option value="50">50개</option>
+                    </select>
+                    <div class="pager">
+                        <button class="btn btn-secondary btn-sm" onclick="prevPage('allow-ipports')">이전</button>
+                        <span id="page-allow-ipports">1 / 1</span>
+                        <button class="btn btn-secondary btn-sm" onclick="nextPage('allow-ipports')">다음</button>
+                    </div>
+                    <span class="badge" id="selcount-allow-ipports">선택 0</span>
+                </div>
+                <div class="rule-list" id="list-allow-ipports">
 					<?php if (empty($rules['allowed_ip_ports'])): ?>
 						<div class="empty-state">
 							<svg fill="currentColor" viewBox="0 0 20 20">
@@ -1040,12 +1087,15 @@ if (isSuperAdmin($admin)) {
 								}
 							}
 							?>
-							<div class="rule-item" id="allow-<?php echo md5($ipport); ?>" data-target-type="<?php echo htmlspecialchars($targetType); ?>">
+							<div class="rule-item has-checkbox" id="allow-<?php echo md5($ipport); ?>" data-target-type="<?php echo htmlspecialchars($targetType); ?>" data-ip="<?php echo htmlspecialchars($ip); ?>" data-port="<?php echo htmlspecialchars($port); ?>" data-scope-type="<?php echo htmlspecialchars($targetType); ?>" data-scope-value="<?php echo htmlspecialchars($targetValue); ?>">
+								<div style="margin-right:10px; display:flex; align-items:center;">
+									<input type="checkbox" class="allow-ipport-checkbox">
+								</div>
 								<div style="flex: 1;">
 									<span class="rule-text"><?php echo $displayText; ?></span>
-									<?php if ($displayMemo): ?>
-										<span class="rule-memo"><?php echo htmlspecialchars($displayMemo); ?></span>
-									<?php endif; ?>
+                                    <?php if ($displayMemo): ?>
+                                        <span class="rule-memo"><?php echo htmlspecialchars($displayMemo); ?><?php $__okey = $ip . ':' . $port; $__on = isset($owners['ipports'][$__okey]['name']) ? $owners['ipports'][$__okey]['name'] : ''; if ($__on) { echo ' · ' . htmlspecialchars($__on); } ?></span>
+                                    <?php endif; ?>
 								</div>
 								<button class="btn btn-danger btn-sm" onclick="unallowIPPort('<?php echo htmlspecialchars($ip); ?>', '<?php echo htmlspecialchars($port); ?>', '<?php echo htmlspecialchars($targetType); ?>', '<?php echo htmlspecialchars($targetValue); ?>')">허용 해제</button>
 							</div>
@@ -1059,11 +1109,18 @@ if (isSuperAdmin($admin)) {
 		<div class="main-grid">
 			<!-- IP 차단 관리 -->
 			<div class="card">
-				<div class="card-header">
-					<h3 class="card-title">🚫 IP 차단 관리</h3>
-					<span class="badge badge-ip"><?php echo count($rules['blocked_ips']); ?>개</span>
+                <div class="card-header">
+                    <h3 class="card-title">🚫 IP 차단 관리</h3>
+                    <span class="badge badge-ip" id="badge-block-ips"><?php echo count($rules['blocked_ips']); ?>개</span>
+                </div>
+			<div class="card-body">
+				<!-- 일괄 작업 툴바 (IP 차단) -->
+				<div style="display:flex; gap:10px; align-items:center; margin-bottom:12px;">
+					<label style="display:flex; align-items:center; gap:6px; font-size:14px; color:#4a5568;">
+						<input type="checkbox" id="block-ip-select-all" onclick="toggleSelectAll('block-ip', this.checked)"> 전체 선택
+					</label>
+					<button class="btn btn-danger btn-sm" onclick="bulkUnbanIPs()">선택 차단 해제</button>
 				</div>
-				<div class="card-body">
 					<form class="form-inline" onsubmit="return blockIP(event)">
 						<select class="target-select-inline" id="ip-target-type">
 							<option value="all">전체 서버</option>
@@ -1077,7 +1134,22 @@ if (isSuperAdmin($admin)) {
 						<button type="submit" class="btn btn-primary">차단 추가</button>
 					</form>
 
-					<div class="rule-list">
+                <div class="list-tools">
+                    <input type="text" class="form-input" id="search-block-ips" placeholder="검색 (IP, 서버ID, 메모)" oninput="setSearch('block-ips', this.value)">
+                    <button class="btn btn-secondary btn-sm" onclick="resetSearch('block-ips')">검색 초기화</button>
+                    <select class="form-input" style="width:auto;" id="perpage-block-ips" onchange="setPerPage('block-ips', this.value)">
+                        <option value="10" selected>10개</option>
+                        <option value="20">20개</option>
+                        <option value="50">50개</option>
+                    </select>
+                    <div class="pager">
+                        <button class="btn btn-secondary btn-sm" onclick="prevPage('block-ips')">이전</button>
+                        <span id="page-block-ips">1 / 1</span>
+                        <button class="btn btn-secondary btn-sm" onclick="nextPage('block-ips')">다음</button>
+                    </div>
+                    <span class="badge" id="selcount-block-ips">선택 0</span>
+                </div>
+                <div class="rule-list" id="list-block-ips">
 						<?php if (empty($rules['blocked_ips'])): ?>
 							<div class="empty-state">
 								<svg fill="currentColor" viewBox="0 0 20 20">
@@ -1104,11 +1176,14 @@ if (isSuperAdmin($admin)) {
                                     $displayText .= ' <span style="color: #48bb78;">[#' . htmlspecialchars($targetValue) . ']</span>';
                                 }
                                 ?>
-                                <div class="rule-item" id="ip-<?php echo md5($ip . '|' . $targetType . '|' . $targetValue); ?>" data-target-type="<?php echo htmlspecialchars($targetType); ?>">
+                                <div class="rule-item has-checkbox" id="ip-<?php echo md5($ip . '|' . $targetType . '|' . $targetValue); ?>" data-target-type="<?php echo htmlspecialchars($targetType); ?>" data-ip="<?php echo htmlspecialchars($ip); ?>" data-scope-type="<?php echo htmlspecialchars($targetType); ?>" data-scope-value="<?php echo htmlspecialchars($targetValue); ?>">
+                                    <div style="margin-right:10px; display:flex; align-items:center;">
+                                        <input type="checkbox" class="block-ip-checkbox">
+                                    </div>
                                     <div style="flex: 1;">
                                         <span class="rule-text"><?php echo $displayText; ?></span>
                                         <?php if ($comment): ?>
-                                            <span class="rule-memo"><?php echo htmlspecialchars($comment); ?></span>
+                                            <span class="rule-memo"><?php echo htmlspecialchars($comment); ?><?php $__on = isset($owners['ips'][$ip]['name']) ? $owners['ips'][$ip]['name'] : ''; if ($__on) { echo ' · ' . htmlspecialchars($__on); } ?></span>
                                         <?php endif; ?>
                                     </div>
                                     <button class="btn btn-danger btn-sm" onclick="unblockIP('<?php echo htmlspecialchars($ip); ?>','<?php echo htmlspecialchars($targetType); ?>','<?php echo htmlspecialchars($targetValue); ?>')">해제</button>
@@ -1121,11 +1196,18 @@ if (isSuperAdmin($admin)) {
 
 		<!-- 포트 차단 관리 -->
 			<div class="card">
-				<div class="card-header">
-					<h3 class="card-title">🔒 포트 차단 관리</h3>
-					<span class="badge badge-port"><?php echo count($rules['blocked_ports']); ?>개</span>
-				</div>
+                <div class="card-header">
+                    <h3 class="card-title">🔒 포트 차단 관리</h3>
+                    <span class="badge badge-port" id="badge-block-ports"><?php echo count($rules['blocked_ports']); ?>개</span>
+                </div>
 				<div class="card-body">
+					<!-- 일괄 작업 툴바 (포트 차단) -->
+					<div style="display:flex; gap:10px; align-items:center; margin-bottom:12px;">
+						<label style="display:flex; align-items:center; gap:6px; font-size:14px; color:#4a5568;">
+							<input type="checkbox" id="block-port-select-all" onclick="toggleSelectAll('block-port', this.checked)"> 전체 선택
+						</label>
+						<button class="btn btn-danger btn-sm" onclick="bulkUnblockPorts()">선택 차단 해제</button>
+					</div>
 					<form class="form-inline" onsubmit="return blockPort(event)">
 						<select class="target-select-inline" id="port-target-type">
 							<option value="all">전체 서버</option>
@@ -1139,7 +1221,22 @@ if (isSuperAdmin($admin)) {
 						<button type="submit" class="btn btn-primary">차단 추가</button>
 					</form>
 
-					<div class="rule-list">
+                <div class="list-tools">
+                    <input type="text" class="form-input" id="search-block-ports" placeholder="검색 (포트, 서버ID, 메모)" oninput="setSearch('block-ports', this.value)">
+                    <button class="btn btn-secondary btn-sm" onclick="resetSearch('block-ports')">검색 초기화</button>
+                    <select class="form-input" style="width:auto;" id="perpage-block-ports" onchange="setPerPage('block-ports', this.value)">
+                        <option value="10" selected>10개</option>
+                        <option value="20">20개</option>
+                        <option value="50">50개</option>
+                    </select>
+                    <div class="pager">
+                        <button class="btn btn-secondary btn-sm" onclick="prevPage('block-ports')">이전</button>
+                        <span id="page-block-ports">1 / 1</span>
+                        <button class="btn btn-secondary btn-sm" onclick="nextPage('block-ports')">다음</button>
+                    </div>
+                    <span class="badge" id="selcount-block-ports">선택 0</span>
+                </div>
+                <div class="rule-list" id="list-block-ports">
 						<?php if (empty($rules['blocked_ports'])): ?>
 							<div class="empty-state">
 								<svg fill="currentColor" viewBox="0 0 20 20">
@@ -1167,11 +1264,14 @@ if (isSuperAdmin($admin)) {
                                     $displayText .= ' <span style="color: #48bb78;">[#' . htmlspecialchars($targetValue) . ']</span>';
                                 }
                                 ?>
-                                <div class="rule-item" id="port-<?php echo htmlspecialchars($port) . '-' . md5($targetType . '|' . $targetValue); ?>" data-target-type="<?php echo htmlspecialchars($targetType); ?>">
+                                <div class="rule-item has-checkbox" id="port-<?php echo htmlspecialchars($port) . '-' . md5($targetType . '|' . $targetValue); ?>" data-target-type="<?php echo htmlspecialchars($targetType); ?>" data-port="<?php echo htmlspecialchars($port); ?>" data-scope-type="<?php echo htmlspecialchars($targetType); ?>" data-scope-value="<?php echo htmlspecialchars($targetValue); ?>">
+                                    <div style="margin-right:10px; display:flex; align-items:center;">
+                                        <input type="checkbox" class="block-port-checkbox">
+                                    </div>
                                     <div style="flex: 1;">
                                         <span class="rule-text"><?php echo $displayText; ?></span>
                                         <?php if ($comment): ?>
-                                            <span class="rule-memo"><?php echo htmlspecialchars($comment); ?></span>
+                                            <span class="rule-memo"><?php echo htmlspecialchars($comment); ?><?php $__on = isset($owners['ports'][$port]['name']) ? $owners['ports'][$port]['name'] : ''; if ($__on) { echo ' · ' . htmlspecialchars($__on); } ?></span>
                                         <?php endif; ?>
                                     </div>
                                     <button class="btn btn-danger btn-sm" onclick="unblockPort('<?php echo htmlspecialchars($port); ?>','<?php echo htmlspecialchars($targetType); ?>','<?php echo htmlspecialchars($targetValue); ?>')">해제</button>
@@ -1183,11 +1283,18 @@ if (isSuperAdmin($admin)) {
 
 			<!-- 포트 허용 관리 -->
 			<div class="card">
-				<div class="card-header">
-					<h3 class="card-title">✅ 포트 허용 관리</h3>
-					<span class="badge badge-port" style="background:#c6f6d5; color:#22543d;"><?php echo count($rules['allowed_ports']); ?>개</span>
-				</div>
+                <div class="card-header">
+                    <h3 class="card-title">✅ 포트 허용 관리</h3>
+                    <span class="badge badge-port" id="badge-allow-ports" style="background:#c6f6d5; color:#22543d;"><?php echo count($rules['allowed_ports']); ?>개</span>
+                </div>
 				<div class="card-body">
+					<!-- 일괄 작업 툴바 (포트 허용) -->
+					<div style="display:flex; gap:10px; align-items:center; margin-bottom:12px;">
+						<label style="display:flex; align-items:center; gap:6px; font-size:14px; color:#4a5568;">
+							<input type="checkbox" id="allow-port-select-all" onclick="toggleSelectAll('allow-port', this.checked)"> 전체 선택
+						</label>
+						<button class="btn btn-danger btn-sm" style="background:#e53e3e;" onclick="bulkUnallowPorts()">선택 허용 해제</button>
+					</div>
 					<form class="form-inline" onsubmit="return allowPort(event)">
 						<select class="target-select-inline" id="allowport-target-type">
 							<option value="all">전체 서버</option>
@@ -1201,7 +1308,22 @@ if (isSuperAdmin($admin)) {
 						<button type="submit" class="btn btn-primary" style="background:#48bb78;">허용 추가</button>
 					</form>
 
-					<div class="rule-list">
+                <div class="list-tools">
+                    <input type="text" class="form-input" id="search-allow-ports" placeholder="검색 (포트, 서버ID, 메모)" oninput="setSearch('allow-ports', this.value)">
+                    <button class="btn btn-secondary btn-sm" onclick="resetSearch('allow-ports')">검색 초기화</button>
+                    <select class="form-input" style="width:auto;" id="perpage-allow-ports" onchange="setPerPage('allow-ports', this.value)">
+                        <option value="10" selected>10개</option>
+                        <option value="20">20개</option>
+                        <option value="50">50개</option>
+                    </select>
+                    <div class="pager">
+                        <button class="btn btn-secondary btn-sm" onclick="prevPage('allow-ports')">이전</button>
+                        <span id="page-allow-ports">1 / 1</span>
+                        <button class="btn btn-secondary btn-sm" onclick="nextPage('allow-ports')">다음</button>
+                    </div>
+                    <span class="badge" id="selcount-allow-ports">선택 0</span>
+                </div>
+                <div class="rule-list" id="list-allow-ports">
 						<?php if (empty($rules['allowed_ports'])): ?>
 							<div class="empty-state">
 								<svg fill="currentColor" viewBox="0 0 20 20">
@@ -1228,12 +1350,15 @@ if (isSuperAdmin($admin)) {
 									$displayText .= ' <span style="color: #48bb78;">[#' . htmlspecialchars($targetValue) . ']</span>';
 								}
 								?>
-								<div class="rule-item" id="allowport-<?php echo htmlspecialchars($port) . '-' . md5($targetType . '|' . $targetValue); ?>" data-target-type="<?php echo htmlspecialchars($targetType); ?>">
+								<div class="rule-item has-checkbox" id="allowport-<?php echo htmlspecialchars($port) . '-' . md5($targetType . '|' . $targetValue); ?>" data-target-type="<?php echo htmlspecialchars($targetType); ?>" data-port="<?php echo htmlspecialchars($port); ?>" data-scope-type="<?php echo htmlspecialchars($targetType); ?>" data-scope-value="<?php echo htmlspecialchars($targetValue); ?>">
+									<div style="margin-right:10px; display:flex; align-items:center;">
+										<input type="checkbox" class="allow-port-checkbox">
+									</div>
 									<div style="flex: 1;">
 										<span class="rule-text"><?php echo $displayText; ?></span>
-										<?php if ($comment): ?>
-											<span class="rule-memo"><?php echo htmlspecialchars($comment); ?></span>
-										<?php endif; ?>
+                                    <?php if ($comment): ?>
+                                        <span class="rule-memo"><?php echo htmlspecialchars($comment); ?><?php $__on = isset($owners['ports'][$port]['name']) ? $owners['ports'][$port]['name'] : ''; if ($__on) { echo ' · ' . htmlspecialchars($__on); } ?></span>
+                                    <?php endif; ?>
 									</div>
 									<button class="btn btn-danger btn-sm" onclick="unallowPort('<?php echo htmlspecialchars($port); ?>','<?php echo htmlspecialchars($targetType); ?>','<?php echo htmlspecialchars($targetValue); ?>')">허용 해제</button>
 								</div>
@@ -1247,11 +1372,18 @@ if (isSuperAdmin($admin)) {
 
 		<!-- IP:PORT 차단 관리 섹션 (블랙리스트) -->
 		<div class="card" style="margin-bottom: 30px;">
-			<div class="card-header">
-				<h3 class="card-title">🔐 IP:PORT 차단 관리 (블랙리스트)</h3>
-				<span class="badge badge-combo"><?php echo count($rules['blocked_ip_ports']); ?>개</span>
-			</div>
+                <div class="card-header">
+                    <h3 class="card-title">🔐 IP:PORT 차단 관리 (블랙리스트)</h3>
+                    <span class="badge badge-combo" id="badge-block-ipports"><?php echo count($rules['blocked_ip_ports']); ?>개</span>
+                </div>
 			<div class="card-body">
+				<!-- 일괄 작업 툴바 -->
+				<div style="display:flex; gap:10px; align-items:center; margin-bottom:12px;">
+					<label style="display:flex; align-items:center; gap:6px; font-size:14px; color:#4a5568;">
+						<input type="checkbox" id="block-ipport-select-all" onclick="toggleSelectAll('block-ipport', this.checked)"> 전체 선택
+					</label>
+					<button class="btn btn-danger btn-sm" onclick="bulkUnblockIPPorts()">선택 차단 해제</button>
+				</div>
 				<form class="form-inline" onsubmit="return blockIPPort(event)">
 					<select class="target-select-inline" id="block-target-type">
 						<option value="all">전체 서버</option>
@@ -1266,7 +1398,22 @@ if (isSuperAdmin($admin)) {
 					<button type="submit" class="btn btn-primary">차단 추가</button>
 				</form>
 
-				<div class="rule-list">
+                <div class="list-tools">
+                    <input type="text" class="form-input" id="search-block-ipports" placeholder="검색 (IP, 포트, 서버ID, 메모)" oninput="setSearch('block-ipports', this.value)">
+                    <button class="btn btn-secondary btn-sm" onclick="resetSearch('block-ipports')">검색 초기화</button>
+                    <select class="form-input" style="width:auto;" id="perpage-block-ipports" onchange="setPerPage('block-ipports', this.value)">
+                        <option value="10" selected>10개</option>
+                        <option value="20">20개</option>
+                        <option value="50">50개</option>
+                    </select>
+                    <div class="pager">
+                        <button class="btn btn-secondary btn-sm" onclick="prevPage('block-ipports')">이전</button>
+                        <span id="page-block-ipports">1 / 1</span>
+                        <button class="btn btn-secondary btn-sm" onclick="nextPage('block-ipports')">다음</button>
+                    </div>
+                    <span class="badge" id="selcount-block-ipports">선택 0</span>
+                </div>
+                <div class="rule-list" id="list-block-ipports">
 					<?php if (empty($rules['blocked_ip_ports'])): ?>
 						<div class="empty-state">
 							<svg fill="currentColor" viewBox="0 0 20 20">
@@ -1317,12 +1464,15 @@ if (isSuperAdmin($admin)) {
 								}
 							}
 							?>
-							<div class="rule-item" id="ipport-<?php echo md5($ipport); ?>" data-target-type="<?php echo htmlspecialchars($targetType); ?>">
+							<div class="rule-item has-checkbox" id="ipport-<?php echo md5($ipport); ?>" data-target-type="<?php echo htmlspecialchars($targetType); ?>" data-ip="<?php echo htmlspecialchars($ip); ?>" data-port="<?php echo htmlspecialchars($port); ?>" data-scope-type="<?php echo htmlspecialchars($targetType); ?>" data-scope-value="<?php echo htmlspecialchars($targetValue); ?>">
+								<div style="margin-right:10px; display:flex; align-items:center;">
+									<input type="checkbox" class="block-ipport-checkbox">
+								</div>
 								<div style="flex: 1;">
 									<span class="rule-text"><?php echo $displayText; ?></span>
-									<?php if ($displayMemo): ?>
-										<span class="rule-memo"><?php echo htmlspecialchars($displayMemo); ?></span>
-									<?php endif; ?>
+                                    <?php if ($displayMemo): ?>
+                                        <span class="rule-memo"><?php echo htmlspecialchars($displayMemo); ?><?php $__okey = $ip . ':' . $port; $__on = isset($owners['ipports'][$__okey]['name']) ? $owners['ipports'][$__okey]['name'] : ''; if ($__on) { echo ' · ' . htmlspecialchars($__on); } ?></span>
+                                    <?php endif; ?>
 								</div>
 								<button class="btn btn-danger btn-sm" onclick="unblockIPPort('<?php echo htmlspecialchars($ip); ?>', '<?php echo htmlspecialchars($port); ?>', '<?php echo htmlspecialchars($targetType); ?>', '<?php echo htmlspecialchars($targetValue); ?>')">해제</button>
 							</div>
@@ -1403,6 +1553,67 @@ if (isSuperAdmin($admin)) {
 	<script>
 		const API_TOKEN = '<?php echo API_TOKEN; ?>';
 		const CSRF_TOKEN = '<?php echo $csrfToken; ?>';
+
+		async function loadServers() {
+			try {
+				const res = await fetch('api_servers.php?action=list&token=' + encodeURIComponent(API_TOKEN), { credentials: 'same-origin' });
+				const data = await res.json();
+				if (!data.ok) return;
+				const list = Array.isArray(data.servers) ? data.servers : [];
+				renderServerList(list);
+			} catch (e) { /* ignore */ }
+		}
+
+		function renderServerList(list) {
+			const dl = document.getElementById('known-servers');
+			if (dl) {
+				dl.innerHTML = '';
+				list.forEach(s => {
+					const opt = document.createElement('option');
+					opt.value = s;
+					dl.appendChild(opt);
+				});
+			}
+			const tags = document.getElementById('server-tags');
+			if (tags) {
+				tags.innerHTML = '';
+				list.forEach(s => {
+					const el = document.createElement('span');
+					el.textContent = s;
+					el.style.cssText = 'background:#edf2f7;color:#2d3748;padding:4px 8px;border-radius:6px;font-size:12px;';
+					tags.appendChild(el);
+				});
+			}
+		}
+
+		async function addServer() {
+			const inp = document.getElementById('new-server-id');
+			if (!inp) return;
+			const val = (inp.value || '').trim();
+			if (!val) { alert('서버 ID를 입력하세요.'); return; }
+			try {
+				const body = new URLSearchParams();
+				body.set('token', API_TOKEN);
+				body.set('action', 'add');
+				body.set('server_id', val);
+				const res = await fetch('api_servers.php', { method: 'POST', body, credentials: 'same-origin' });
+				const data = await res.json();
+				if (data.ok) {
+					inp.value = '';
+					// merge new value into list and rerender
+					const dl = document.getElementById('known-servers');
+					const current = dl ? Array.from(dl.querySelectorAll('option')).map(o => o.value) : [];
+					if (current.indexOf(val) === -1) current.push(val);
+					current.sort();
+					renderServerList(current);
+					showAlert('서버가 추가되었습니다.', 'success');
+				} else {
+					showAlert(data.err || '추가 실패', 'error');
+				}
+			} catch (e) {
+				showAlert('네트워크 오류', 'error');
+			}
+		}
 
 		function updateTargetOptions() {
 			const targetType = document.getElementById('target-type').value;
@@ -1501,23 +1712,13 @@ if (isSuperAdmin($admin)) {
 		function filterRules() {
 			const checkedTypes = [];
 
-			// 체크된 타겎 가져오기
-			document.querySelectorAll('.filter-checkbox input[type="checkbox"]:checked').forEach(checkbox => {
-				checkedTypes.push(checkbox.value);
-			});
-
-			// 모든 rule-item 요소 가져오기
-			document.querySelectorAll('.rule-item').forEach(item => {
-				const targetType = item.getAttribute('data-target-type') || 'all';
-
-				// 해당 타겎이 체크되어 있으면 표시, 아니면 숨기기
-				if (checkedTypes.includes(targetType)) {
-					item.style.display = 'flex';
-				} else {
-					item.style.display = 'none';
-				}
-			});
-		}
+        // 필터 타입만 상태에 반영하고 목록 렌더링을 갱신
+        document.querySelectorAll('.filter-checkbox input[type="checkbox"]:checked').forEach(checkbox => {
+            checkedTypes.push(checkbox.value);
+        });
+        window.ALLOW_IPPORTS_FILTER = checkedTypes; // 전역 상태 저장
+        refreshSection('allow-ipports');
+        }
 
 		// 필터 상태를 localStorage에 저장
 		function saveFilterState() {
@@ -1528,25 +1729,25 @@ if (isSuperAdmin($admin)) {
 			localStorage.setItem('rdip_filter_state', JSON.stringify(filterState));
 		}
 
-		// 저장된 필터 상태 복원
-		function restoreFilterState() {
-			const savedState = localStorage.getItem('rdip_filter_state');
-			if (savedState) {
-				try {
-					const filterState = JSON.parse(savedState);
-					for (const [id, checked] of Object.entries(filterState)) {
-						const checkbox = document.getElementById(id);
-						if (checkbox) {
-							checkbox.checked = checked;
-						}
-					}
-					// 복원 후 필터 적용
-					filterRules();
-				} catch (e) {
-					console.error('Failed to restore filter state:', e);
-				}
-			}
-		}
+        // 저장된 필터 상태 복원
+        function restoreFilterState() {
+            const savedState = localStorage.getItem('rdip_filter_state');
+            if (savedState) {
+                try {
+                    const filterState = JSON.parse(savedState);
+                    for (const [id, checked] of Object.entries(filterState)) {
+                        const checkbox = document.getElementById(id);
+                        if (checkbox) {
+                            checkbox.checked = checked;
+                        }
+                    }
+                    // 복원 후 목록 갱신 (필터 반영)
+                    filterRules();
+                } catch (e) {
+                    console.error('Failed to restore filter state:', e);
+                }
+            }
+        }
 
 		function addTargetParams(data, targetType) {
 			// 추가 입력 필드가 필요한 경우 프롬프트 표시
@@ -1592,8 +1793,8 @@ if (isSuperAdmin($admin)) {
 			}, 5000);
 		}
 
-		async function apiCall(endpoint, data) {
-			showLoading();
+    async function apiCall(endpoint, data, afterOk) {
+        showLoading();
 
 			const formData = new FormData();
 			formData.append('token', API_TOKEN);
@@ -1603,7 +1804,9 @@ if (isSuperAdmin($admin)) {
 			const targetParams = getTargetParams();
 			for (const key in targetParams) {
 				formData.append(key, targetParams[key]);
-			}
+    }
+
+        // pagination/search helpers moved to global scope below
 
 			for (const key in data) {
 				formData.append(key, data[key]);
@@ -1618,10 +1821,15 @@ if (isSuperAdmin($admin)) {
 				const result = await response.json();
 				hideLoading();
 
-				if (result.ok) {
-					showAlert('작업이 성공적으로 완료되었습니다.');
-					setTimeout(() => location.reload(), 1000);
-				} else {
+                if (result.ok) {
+                    showAlert('작업이 성공적으로 완료되었습니다.');
+                    if (typeof afterOk === 'function') {
+                        try { afterOk(result); } catch(e) { console.error(e); }
+                    } else {
+                        // 기존 동작 유지: 단건 호출 등은 새로고침
+                        setTimeout(() => location.reload(), 800);
+                    }
+                } else {
 					showAlert('오류: ' + (result.err || '알 수 없는 오류'), 'error');
 				}
 
@@ -1804,10 +2012,416 @@ if (isSuperAdmin($admin)) {
 			apiCall('api_unallow_ipport.php', data);
 		}
 
-		// 페이지 로드 시 필터 상태 복원
-		document.addEventListener('DOMContentLoaded', function() {
-			restoreFilterState();
-		});
+		// ---- 일괄 처리 유틸 ----
+        function toggleSelectAll(kind, checked) {
+            const section = normalizeSection(kind);
+            const cls = checkboxSelector(section);
+            if (!cls) return;
+            document.querySelectorAll(cls).forEach(cb => {
+                const item = cb.closest('.rule-item');
+                if (!item) return;
+                // Only affect visible items (pagination/search filtered)
+                const visible = item.style.display !== 'none';
+                if (visible) cb.checked = checked;
+            });
+            updateSelectionCount(section);
+        }
+
+        function collectSelectedEntries(kind) {
+            const section = normalizeSection(kind);
+            const selector = checkboxSelector(section) || '';
+            const entries = [];
+            if (!selector) return entries;
+            document.querySelectorAll(selector + ':checked').forEach(cb => {
+                const item = cb.closest('.rule-item');
+                if (!item) return;
+                const ttype = item.getAttribute('data-scope-type') || 'all';
+                const tval = item.getAttribute('data-scope-value') || '';
+
+                if (section === 'allow-ipports' || section === 'block-ipports') {
+                    const ip = item.getAttribute('data-ip') || '';
+                    const port = item.getAttribute('data-port') || '';
+                    if (ip && port) entries.push({ ip, port, target_type: ttype, target_value: tval });
+                } else if (section === 'block-ips') {
+                    const ip = item.getAttribute('data-ip') || '';
+                    if (ip) entries.push({ ip, target_type: ttype, target_value: tval });
+                } else if (section === 'block-ports' || section === 'allow-ports') {
+                    const port = item.getAttribute('data-port') || '';
+                    if (port) entries.push({ port, target_type: ttype, target_value: tval });
+                }
+            });
+            return entries;
+        }
+
+        function normalizeSection(kind) {
+            // accept legacy kinds and return our SECTION_STATE key
+            switch (kind) {
+                case 'allow-ipport': return 'allow-ipports';
+                case 'block-ipport': return 'block-ipports';
+                default: return kind; // already section key
+            }
+        }
+
+        function checkboxSelector(section) {
+            const map = {
+                'allow-ipports': '.allow-ipport-checkbox',
+                'block-ipports': '.block-ipport-checkbox',
+                'block-ips': '.block-ip-checkbox',
+                'block-ports': '.block-port-checkbox',
+                'allow-ports': '.allow-port-checkbox',
+            };
+            return map[section] || '';
+        }
+
+        function listIdFor(section) {
+            const map = {
+                'allow-ipports': 'list-allow-ipports',
+                'block-ipports': 'list-block-ipports',
+                'block-ips': 'list-block-ips',
+                'block-ports': 'list-block-ports',
+                'allow-ports': 'list-allow-ports',
+            };
+            return map[section] || '';
+        }
+
+        function sectionFromElement(el) {
+            const list = el.closest('.rule-list');
+            if (!list) return '';
+            const id = list.id || '';
+            if (id === 'list-allow-ipports') return 'allow-ipports';
+            if (id === 'list-block-ipports') return 'block-ipports';
+            if (id === 'list-block-ips') return 'block-ips';
+            if (id === 'list-block-ports') return 'block-ports';
+            if (id === 'list-allow-ports') return 'allow-ports';
+            return '';
+        }
+
+        function updateSelectionCount(section) {
+            const selId = 'selcount-' + section;
+            const badge = document.getElementById(selId);
+            if (!badge) return;
+            const cls = checkboxSelector(section);
+            const list = document.getElementById(listIdFor(section));
+            if (!list || !cls) { badge.textContent = '선택 0'; return; }
+            const n = list.querySelectorAll(cls + ':checked').length;
+            badge.textContent = '선택 ' + n;
+        }
+
+        async function bulkUnallowIPPorts() {
+            const section = 'allow-ipports';
+            const entries = collectSelectedEntries(section);
+            if (!entries.length) { alert('선택된 항목이 없습니다.'); return; }
+            apiCall('api_unallow_ipports_bulk.php', { entries: JSON.stringify(entries), comment: '대시보드에서 일괄 허용 해제' }, () => {
+                removeItemsForBulk(section, entries);
+            });
+        }
+
+        async function bulkUnblockIPPorts() {
+            const section = 'block-ipports';
+            const entries = collectSelectedEntries(section);
+            if (!entries.length) { alert('선택된 항목이 없습니다.'); return; }
+            apiCall('api_unblock_ipports_bulk.php', { entries: JSON.stringify(entries), comment: '대시보드에서 일괄 차단 해제' }, () => {
+                removeItemsForBulk(section, entries);
+            });
+        }
+
+        function setupRowCheckboxToggle() {
+            // Add click listener to rows that contain our bulk checkboxes
+            document.querySelectorAll('.rule-item.has-checkbox').forEach(row => {
+                row.addEventListener('click', function(e) {
+                    // Ignore clicks on interactive controls
+                    if (e.target.closest('button') || e.target.closest('a') || e.target.closest('input')) {
+                        return;
+                    }
+
+                    const cb = row.querySelector('.allow-ipport-checkbox, .block-ipport-checkbox, .block-ip-checkbox, .block-port-checkbox, .allow-port-checkbox');
+                    if (!cb) return;
+                    cb.checked = !cb.checked;
+                    const section = sectionFromElement(row);
+                    if (section) updateSelectionCount(section);
+                });
+                // keyboard accessibility
+                row.setAttribute('tabindex', '0');
+                row.addEventListener('keydown', function(e){
+                    if (e.key === ' ' || e.key === 'Enter') {
+                        e.preventDefault();
+                        const cb = row.querySelector('.allow-ipport-checkbox, .block-ipport-checkbox, .block-ip-checkbox, .block-port-checkbox, .allow-port-checkbox');
+                        if (!cb) return;
+                        cb.checked = !cb.checked;
+                        const section = sectionFromElement(row);
+                        if (section) updateSelectionCount(section);
+                    }
+                });
+            });
+            // direct checkbox changes (click on checkbox itself)
+            document.addEventListener('change', function(e){
+                const t = e.target;
+                if (!(t instanceof HTMLInputElement)) return;
+                if (!t.matches('.allow-ipport-checkbox, .block-ipport-checkbox, .block-ip-checkbox, .block-port-checkbox, .allow-port-checkbox')) return;
+                const section = sectionFromElement(t);
+                if (section) updateSelectionCount(section);
+            });
+        }
+
+        async function bulkUnbanIPs() {
+            const section = 'block-ips';
+            const entries = collectSelectedEntries(section);
+            if (!entries.length) { alert('선택된 항목이 없습니다.'); return; }
+            apiCall('api_del_ips_bulk.php', { entries: JSON.stringify(entries), comment: '대시보드에서 일괄 차단 해제' }, () => {
+                removeItemsForBulk(section, entries);
+            });
+        }
+
+        async function bulkUnblockPorts() {
+            const section = 'block-ports';
+            const entries = collectSelectedEntries(section);
+            if (!entries.length) { alert('선택된 항목이 없습니다.'); return; }
+            apiCall('api_unblock_ports_bulk.php', { entries: JSON.stringify(entries), comment: '대시보드에서 일괄 차단 해제' }, () => {
+                removeItemsForBulk(section, entries);
+            });
+        }
+
+        async function bulkUnallowPorts() {
+            const section = 'allow-ports';
+            const entries = collectSelectedEntries(section);
+            if (!entries.length) { alert('선택된 항목이 없습니다.'); return; }
+            apiCall('api_unallow_ports_bulk.php', { entries: JSON.stringify(entries), comment: '대시보드에서 일괄 허용 해제' }, () => {
+                removeItemsForBulk(section, entries);
+            });
+        }
+
+        function removeItemsForBulk(section, entries) {
+            const list = document.getElementById(listIdFor(section));
+            if (!list) return;
+            const cls = checkboxSelector(section);
+            let removed = 0;
+            entries.forEach(e => {
+                // match by data attributes
+                const selector = (section==='block-ips')
+                    ? `.rule-item[data-ip="${e.ip}"]`
+                    : (section==='block-ports' || section==='allow-ports')
+                        ? `.rule-item[data-port="${e.port}"]`
+                        : `.rule-item[data-ip="${e.ip}"][data-port="${e.port}"]`;
+                const candidates = list.querySelectorAll(selector);
+                candidates.forEach(item => {
+                    // scope match (if provided)
+                    const ttype = item.getAttribute('data-scope-type') || 'all';
+                    const tval = item.getAttribute('data-scope-value') || '';
+                    const mtype = e.target_type || 'all';
+                    const mval = e.target_value || '';
+                    if ((ttype===mtype) && (String(tval)===String(mval))) {
+                        item.remove();
+                        removed++;
+                    }
+                });
+            });
+            if (removed > 0) {
+                adjustCounts(section, -removed);
+                refreshSection(section);
+                updateSelectionCount(section);
+            }
+        }
+
+        function adjustCounts(section, delta) {
+            function adjust(id) {
+                const el = document.getElementById(id);
+                if (!el) return;
+                const m = String(el.textContent).match(/\d+/);
+                const num = m ? parseInt(m[0],10) : 0;
+                const next = Math.max(0, num + delta);
+                if (el.id.startsWith('badge-')) el.textContent = next + '개'; else el.textContent = String(next);
+            }
+            switch (section) {
+                case 'allow-ipports':
+                    adjust('badge-allow-ipports');
+                    adjust('stat-allowed-ipports');
+                    break;
+                case 'block-ipports':
+                    adjust('badge-block-ipports');
+                    adjust('stat-blocked-ipports');
+                    break;
+                case 'block-ips':
+                    adjust('badge-block-ips');
+                    adjust('stat-blocked-ips');
+                    break;
+                case 'block-ports':
+                    adjust('badge-block-ports');
+                    adjust('stat-blocked-ports');
+                    break;
+                case 'allow-ports':
+                    adjust('badge-allow-ports');
+                    break;
+            }
+        }
+
+        // ---- Pagination + Search (global) ----
+        const SECTION_STATE = {
+            'allow-ipports': { page: 1, perPage: 10, search: '' },
+            'block-ipports': { page: 1, perPage: 10, search: '' },
+            'block-ips': { page: 1, perPage: 10, search: '' },
+            'block-ports': { page: 1, perPage: 10, search: '' },
+            'allow-ports': { page: 1, perPage: 10, search: '' },
+        };
+
+        function setSearch(section, q) {
+            if (!SECTION_STATE[section]) return;
+            const st = SECTION_STATE[section];
+            st.search = (q || '').toLowerCase();
+            st.page = 1;
+            if (st._timer) clearTimeout(st._timer);
+            st._timer = setTimeout(() => refreshSection(section), 200);
+        }
+
+        function setPerPage(section, n) {
+            if (!SECTION_STATE[section]) return;
+            const v = parseInt(n, 10);
+            SECTION_STATE[section].perPage = (v === 20 || v === 50) ? v : 10;
+            SECTION_STATE[section].page = 1;
+            refreshSection(section);
+            try { localStorage.setItem('rdip_perpage_'+section, String(SECTION_STATE[section].perPage)); } catch(e){}
+        }
+
+        function resetSearch(section) {
+            const input = document.getElementById('search-'+section);
+            if (input) input.value = '';
+            setSearch(section, '');
+        }
+
+        function prevPage(section) {
+            if (!SECTION_STATE[section]) return;
+            SECTION_STATE[section].page = Math.max(1, SECTION_STATE[section].page - 1);
+            refreshSection(section);
+        }
+        function nextPage(section) {
+            if (!SECTION_STATE[section]) return;
+            SECTION_STATE[section].page += 1; // clamp in refresh
+            refreshSection(section);
+        }
+
+        function matchesSearch(item, q) {
+            if (!q) return true;
+            const text = (item.querySelector('.rule-text')?.textContent || '').toLowerCase();
+            const memo = (item.querySelector('.rule-memo')?.textContent || '').toLowerCase();
+            const ip = (item.getAttribute('data-ip') || '').toLowerCase();
+            const port = (item.getAttribute('data-port') || '').toLowerCase();
+            const scopeVal = (item.getAttribute('data-scope-value') || '').toLowerCase();
+            return text.includes(q) || memo.includes(q) || ip.includes(q) || port.includes(q) || scopeVal.includes(q);
+        }
+
+        function allowedIpportsTypePass(item) {
+            const selected = window.ALLOW_IPPORTS_FILTER || ['all','server','servers','group','groups'];
+            const t = item.getAttribute('data-target-type') || 'all';
+            return selected.includes(t);
+        }
+
+        function refreshSection(section) {
+            const state = SECTION_STATE[section];
+            if (!state) return;
+
+            const listIdMap = {
+                'allow-ipports': 'list-allow-ipports',
+                'block-ipports': 'list-block-ipports',
+                'block-ips': 'list-block-ips',
+                'block-ports': 'list-block-ports',
+                'allow-ports': 'list-allow-ports',
+            };
+            const pageLabelId = {
+                'allow-ipports': 'page-allow-ipports',
+                'block-ipports': 'page-block-ipports',
+                'block-ips': 'page-block-ips',
+                'block-ports': 'page-block-ports',
+                'allow-ports': 'page-allow-ports',
+            };
+
+            const listEl = document.getElementById(listIdMap[section]);
+            if (!listEl) return;
+
+            const items = Array.from(listEl.querySelectorAll('.rule-item'));
+
+            // If there are no rule items at all (server-side empty list),
+            // do NOT show client-side "검색 결과 없음"; leave server message visible.
+            if (items.length === 0) {
+                const label = document.getElementById(pageLabelId[section]);
+                if (label) label.textContent = `0 / 0`;
+                // Hide any residual search-empty blocks if previously injected
+                const residual = listEl.querySelectorAll('.search-empty');
+                residual.forEach(es => { es.style.display = 'none'; });
+                return;
+            }
+
+            // Compute filtered items
+            const filtered = items.filter(it => {
+                // type filter only for allow-ipports
+                if (section === 'allow-ipports' && !allowedIpportsTypePass(it)) return false;
+                return matchesSearch(it, state.search);
+            });
+
+            const totalPagesRaw = Math.ceil(filtered.length / state.perPage);
+            const totalPages = Math.max(1, totalPagesRaw || 1);
+            if (state.page > totalPages) state.page = totalPages;
+
+            // First hide all rule-items; leave server-side empties alone
+            items.forEach(it => { it.style.display = 'none'; });
+
+            // Show only current page slice
+            const start = (state.page - 1) * state.perPage;
+            const end = start + state.perPage;
+            filtered.slice(start, end).forEach(it => { it.style.display = 'flex'; });
+
+            const label = document.getElementById(pageLabelId[section]);
+            if (label) {
+                if (filtered.length === 0) label.textContent = `0 / 0`;
+                else label.textContent = `${state.page} / ${Math.ceil(filtered.length / state.perPage)}`;
+            }
+
+            // Dynamic "검색 결과 없음" inside listEl (ensure single instance visible state only when items exist)
+            let dynEmpty = listEl.querySelector('.search-empty');
+            if (!dynEmpty) {
+                dynEmpty = document.createElement('div');
+                dynEmpty.className = 'empty-state search-empty';
+                dynEmpty.innerHTML = '<svg fill="currentColor" viewBox="0 0 20 20"><path d="M13.477 14.89A6 6 0 015.11 6.524l8.367 8.368zm1.414-1.414L6.524 5.11a6 6 0 018.367 8.367zM18 10a8 8 0 11-16 0 8 8 0 0116 0z" /></svg><p>검색 결과 없음</p>';
+                dynEmpty.style.display = 'none';
+                listEl.appendChild(dynEmpty);
+            }
+            // Hide any other search-empty nodes if present, then toggle current
+            listEl.querySelectorAll('.search-empty').forEach(es => {
+                es.style.display = (filtered.length === 0) ? 'block' : 'none';
+            });
+        }
+
+        // 페이지 로드 시 초기화
+        document.addEventListener('DOMContentLoaded', function() {
+            restoreFilterState();
+            setupRowCheckboxToggle();
+            // 초기 렌더링
+            try {
+                // restore perPage from localStorage
+                Object.keys(SECTION_STATE).forEach(sec => {
+                    const saved = localStorage.getItem('rdip_perpage_'+sec);
+                    if (saved) {
+                        const v = parseInt(saved,10);
+                        if (v===10||v===20||v===50) {
+                            SECTION_STATE[sec].perPage = v;
+                            const sel = document.getElementById('perpage-'+sec);
+                            if (sel) sel.value = String(v);
+                        }
+                    }
+                });
+            } catch(e){}
+            refreshSection('allow-ipports');
+            refreshSection('block-ipports');
+            refreshSection('block-ips');
+            refreshSection('block-ports');
+            refreshSection('allow-ports');
+            // init selection counters
+            updateSelectionCount('allow-ipports');
+            updateSelectionCount('block-ipports');
+            updateSelectionCount('block-ips');
+            updateSelectionCount('block-ports');
+            updateSelectionCount('allow-ports');
+            // 서버 목록 로드
+            loadServers();
+        });
 
 		// 자동 새로고침 (5분마다)
 		setInterval(() => {
