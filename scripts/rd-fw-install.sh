@@ -80,6 +80,9 @@ SSH_PORT="$(ask 'SSH 포트' '2197')"
 EMERGENCY_SSH_CIDR="$(ask '긴급 SSH 허용 CIDR' '210.239.60.44/32')"
 FTP_PORT="$(ask 'FTP 제어 포트' '2193')"
 ARTIFACT_VERSION="$(ask 'Agent artifacts version path (예: v1.2.3, 비우면 latest)' '')"
+if [[ ${OS_FAMILY:-} == ubuntu ]]; then
+  RESET_UFW_ANS="$(ask 'UFW 기본 규칙 초기화 후 적용? (y/N)' 'N')"
+fi
 
 ### 2) 패키지 설치
 if [[ $OS_FAMILY == el7 ]]; then
@@ -223,6 +226,13 @@ ipset create fw_block_ipports hash:ip,port -exist
 ### 6) 방화벽 규칙
 if [[ $OS_FAMILY == ubuntu ]]; then
   echo "[+] Ubuntu: UFW 체인에 ipset 룰 삽입"
+  # 선택적으로 기존 UFW 규칙 초기화(기본 N)
+  if [[ "${RESET_UFW_ANS^^}" == "Y" ]]; then
+    echo "[*] UFW 규칙 초기화 및 기본 정책 설정"
+    ufw --force reset || true
+    ufw default deny incoming || true
+    ufw default allow outgoing || true
+  fi
   ufw allow from "$EMERGENCY_SSH_CIDR" to any port "$SSH_PORT" proto tcp comment "emergency ssh" || true
   iptables -I ufw-before-input 1 -p tcp -m set --match-set fw_block_ipports src,dst -j DROP
   iptables -I ufw-before-input 2 -p tcp -m set --match-set fw_allow_ipports src,dst -j ACCEPT
@@ -231,6 +241,8 @@ if [[ $OS_FAMILY == ubuntu ]]; then
   iptables -I ufw-before-input 5 -p tcp -m set --match-set fw_block_ports dst -j DROP
   iptables -I ufw-before-input 6 -p tcp --dport "$FTP_PORT" -j DROP
   netfilter-persistent save 2>/dev/null || iptables-save > /etc/iptables/rules.v4
+  # UFW 활성화 보장
+  ufw --force enable >/dev/null 2>&1 || true
 else
   echo "[+] CentOS: iptables 직접 구성"
   ensure_iptables_dir
