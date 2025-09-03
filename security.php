@@ -92,23 +92,33 @@ function verifyCSRFToken($token)
  */
 function isIPAllowed($allowedIPs, $currentIP)
 {
-    if (empty($allowedIPs)) {
-        return true; // 제한 없음
+    // 비어있으면 전부 허용 (UI 안내와 일치)
+    if (!isset($allowedIPs) || trim((string)$allowedIPs) === '') {
+        return true;
     }
 
     $allowed = json_decode($allowedIPs, true);
+    // JSON 디코딩 실패 시 보수적으로 거부
     if (!is_array($allowed)) {
         return false;
     }
+    // 빈 배열([])도 전부 허용으로 간주
+    if (count($allowed) === 0) {
+        return true;
+    }
 
     foreach ($allowed as $ip) {
+        $ip = trim((string)$ip);
+        if ($ip === '') continue;
+        // 와일드카드 전체 허용
+        if ($ip === '*') return true;
         // CIDR 표기법 지원
         if (strpos($ip, '/') !== false) {
             if (ipInCIDR($currentIP, $ip)) {
                 return true;
             }
         } else {
-            if ($ip === $currentIP || $ip === '*') {
+            if ($ip === $currentIP) {
                 return true;
             }
         }
