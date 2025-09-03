@@ -7,7 +7,7 @@ require_once __DIR__ . '/lib.php';
 $admin = getCurrentAdmin();
 
 $ip      = isset($_POST['ip'])   ? trim($_POST['ip'])   : '';
-$port    = isset($_POST['port']) ? (int)$_POST['port']  : 0;
+$portRaw = isset($_POST['port']) ? trim((string)$_POST['port']) : '';
 $comment = isset($_POST['comment']) ? trim($_POST['comment']) : '';
 
 // 관리자 정보 확인 (비활성화 등으로 null 가능)
@@ -55,13 +55,37 @@ if ($target_groups !== '') {
     $target_groups = $norm;
 }
 
-if (!validIp($ip)) {
-	echo json_encode(['ok' => false, 'err' => 'invalid ip']);
-	exit;
+// 다중 입력 지원: ip, port 둘 다 콤마(,)로 여러 개 처리
+$ips = array_values(array_filter(array_map('trim', explode(',', $ip)), 'strlen'));
+$ports = array_values(array_filter(array_map('trim', explode(',', $portRaw)), 'strlen'));
+
+if (empty($ips)) {
+    echo json_encode(['ok' => false, 'err' => 'invalid ip']);
+    exit;
 }
-if (!validPort($port)) {
-	echo json_encode(['ok' => false, 'err' => 'invalid port']);
-	exit;
+if (empty($ports)) {
+    echo json_encode(['ok' => false, 'err' => 'invalid port']);
+    exit;
+}
+
+$invalidIps = [];
+foreach ($ips as $ipItem) {
+    if (!validIp($ipItem)) $invalidIps[] = $ipItem;
+}
+if (!empty($invalidIps)) {
+    http_response_code(400);
+    echo json_encode(['ok' => false, 'err' => 'invalid ip(s): ' . implode(', ', $invalidIps)]);
+    exit;
+}
+
+$invalidPorts = [];
+foreach ($ports as $pItem) {
+    if (!validPort($pItem)) $invalidPorts[] = $pItem;
+}
+if (!empty($invalidPorts)) {
+    http_response_code(400);
+    echo json_encode(['ok' => false, 'err' => 'invalid port(s): ' . implode(', ', $invalidPorts)]);
+    exit;
 }
 
 $ok = true;
@@ -69,60 +93,64 @@ $err = null;
 
 try {
 	$r = redisClient();
-	$ipport = "{$ip}:{$port}";
-	
-	// 타겟별로 다른 Redis 키에 저장
-	if ($target_server) {
-		// 특정 서버용 키
-		$r->sadd("fw:block:ipports:server:{$target_server}", [$ipport]);
-		$msg = "block_ipport {$ip} {$port} @server={$target_server}";
-	} elseif ($target_servers) {
-		// 여러 서버 - 각각의 서버 키에 추가
-		$servers = array_map('trim', explode(',', $target_servers));
-		foreach ($servers as $server) {
-			if ($server) {
-				$r->sadd("fw:block:ipports:server:{$server}", [$ipport]);
+	// 모든 조합 처리
+	foreach ($ips as $ipItem) {
+		foreach ($ports as $portItem) {
+			$ipport = "{$ipItem}:{$portItem}";
+
+			if ($target_server) {
+				$r->sadd("fw:block:ipports:server:{$target_server}", [$ipport]);
+				$msg = "block_ipport {$ipItem} {$portItem} @server={$target_server}";
+			} elseif ($target_servers) {
+				$servers = array_map('trim', explode(',', $target_servers));
+				foreach ($servers as $server) {
+					if ($server) {
+						$r->sadd("fw:block:ipports:server:{$server}", [$ipport]);
+					}
+				}
+				$msg = "block_ipport {$ipItem} {$portItem} @servers={$target_servers}";
+			} elseif ($target_group) {
+				$r->sadd("fw:block:ipports:group:{$target_group}", [$ipport]);
+				$msg = "block_ipport {$ipItem} {$portItem} @group={$target_group}";
+			} elseif ($target_groups) {
+				$groups = array_map('trim', explode(',', $target_groups));
+				foreach ($groups as $group) {
+					if ($group) {
+						$r->sadd("fw:block:ipports:group:{$group}", [$ipport]);
+					}
+				}
+				$msg = "block_ipport {$ipItem} {$portItem} @groups={$target_groups}";
+			} else {
+				$r->sadd('fw:block:ipports', [$ipport]);
+				$msg = "block_ipport {$ipItem} {$portItem}";
 			}
+
+			$r->publish(REDIS_CH, $msg);
 		}
-		$msg = "block_ipport {$ip} {$port} @servers={$target_servers}";
-	} elseif ($target_group) {
-		// 특정 그룹용 키
-		$r->sadd("fw:block:ipports:group:{$target_group}", [$ipport]);
-		$msg = "block_ipport {$ip} {$port} @group={$target_group}";
-	} elseif ($target_groups) {
-		// 여러 그룹 - 각각의 그룹 키에 추가
-		$groups = array_map('trim', explode(',', $target_groups));
-		foreach ($groups as $group) {
-			if ($group) {
-				$r->sadd("fw:block:ipports:group:{$group}", [$ipport]);
-			}
-		}
-		$msg = "block_ipport {$ip} {$port} @groups={$target_groups}";
-	} else {
-		// 전체 서버 (기본)
-		$r->sadd('fw:block:ipports', [$ipport]);
-		$msg = "block_ipport {$ip} {$port}";
 	}
-	
-	$r->publish(REDIS_CH, $msg);
 } catch (Exception $e) {
 	$ok = false;
 	$err = $e->getMessage();
 }
 
-logFirewall([
-	'action' => 'block_ipport',
-	'ip' => $ip,
-	'port' => $port,
-	'comment' => $comment,
-	'target_server' => $target_server,
-	'target_servers' => $target_servers,
-	'target_group' => $target_group,
-	'target_groups' => $target_groups,
-	'uid' => $uid,
-	'uname' => $uname,
-	'status' => $ok ? 'OK' : 'ERR',
-	'error' => $err
-]);
+// 각 조합별로 감사 로그 기록
+foreach ($ips as $ipItem) {
+    foreach ($ports as $portItem) {
+        logFirewall([
+            'action' => 'block_ipport',
+            'ip' => $ipItem,
+            'port' => (int)$portItem,
+            'comment' => $comment,
+            'target_server' => $target_server,
+            'target_servers' => $target_servers,
+            'target_group' => $target_group,
+            'target_groups' => $target_groups,
+            'uid' => $uid,
+            'uname' => $uname,
+            'status' => $ok ? 'OK' : 'ERR',
+            'error' => $err
+        ]);
+    }
+}
 
 echo json_encode(['ok' => $ok, 'err' => $err]);

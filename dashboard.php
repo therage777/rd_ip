@@ -1126,8 +1126,8 @@ $stats = $pdo->query("
 						<option value="group">서버 그룹</option>
 						<option value="groups">여러 서버 그룹</option>
 					</select>
-					<input type="text" class="form-input" id="ipport-ip-input" placeholder="IP 주소" pattern="^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$" required>
-					<input type="number" class="form-input" id="ipport-port-input" placeholder="포트" min="1" max="65535" required>
+					<input type="text" class="form-input" id="ipport-ip-input" placeholder="IP 주소 (여러 개는 , 로 구분)" required>
+					<input type="text" class="form-input" id="ipport-port-input" placeholder="포트 (여러 개는 , 로 구분)" required>
 					<input type="text" class="form-input" id="ipport-comment-input" placeholder="메모 (선택)" style="flex: 2;">
 					<button type="submit" class="btn btn-primary">차단 추가</button>
 				</form>
