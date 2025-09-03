@@ -89,7 +89,7 @@ try {
     }
 
     // Build publish message with scope
-    $msg = "unblock_port $port";
+    $msg = "unblock_port $portRaw";
     if ($target_server) {
         $msg .= " @server={$target_server}";
     } elseif ($target_servers) {
