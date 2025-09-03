@@ -90,11 +90,18 @@ function validPortOrRange($s)
 
 function logFirewall($data)
 {
-    $sql = "INSERT INTO firewall_logs
-            (action,target_ip,target_port,comment,target_server,target_servers,target_group,target_groups,actor_user_id,actor_name,actor_ip,user_agent,status,error_msg)
-            VALUES (:action,:target_ip,:target_port,:comment,:target_server,:target_servers,:target_group,:target_groups,:actor_user_id,:actor_name,:actor_ip,:user_agent,:status,:error_msg)";
-    pdo()->prepare($sql)->execute([
-        ':action' => $data['action'],
+    static $hasRangeCols = null;
+    if ($hasRangeCols === null) {
+        try {
+            $stmt = pdo()->query("SHOW COLUMNS FROM firewall_logs LIKE 'target_port_from'");
+            $hasRangeCols = (bool)$stmt->fetch();
+        } catch (Exception $e) {
+            $hasRangeCols = false;
+        }
+    }
+
+    $params = [
+        ':action' => isset($data['action']) ? $data['action'] : null,
         ':target_ip' => isset($data['ip']) ? $data['ip'] : null,
         ':target_port' => isset($data['port']) ? $data['port'] : null,
         ':comment' => isset($data['comment']) ? $data['comment'] : null,
@@ -106,9 +113,25 @@ function logFirewall($data)
         ':actor_name' => isset($data['uname']) ? $data['uname'] : null,
         ':actor_ip' => actorIp(),
         ':user_agent' => userAgent(),
-        ':status' => $data['status'],
+        ':status' => isset($data['status']) ? $data['status'] : 'OK',
         ':error_msg' => isset($data['error']) ? substr($data['error'], 0, 250) : null,
-    ]);
+    ];
+
+    if ($hasRangeCols) {
+        // 선택적 범위 파라미터
+        $params[':target_port_from'] = isset($data['port_from']) ? (int)$data['port_from'] : null;
+        $params[':target_port_to']   = isset($data['port_to']) ? (int)$data['port_to'] : null;
+
+        $sql = "INSERT INTO firewall_logs
+                (action,target_ip,target_port,target_port_from,target_port_to,comment,target_server,target_servers,target_group,target_groups,actor_user_id,actor_name,actor_ip,user_agent,status,error_msg)
+                VALUES (:action,:target_ip,:target_port,:target_port_from,:target_port_to,:comment,:target_server,:target_servers,:target_group,:target_groups,:actor_user_id,:actor_name,:actor_ip,:user_agent,:status,:error_msg)";
+    } else {
+        $sql = "INSERT INTO firewall_logs
+                (action,target_ip,target_port,comment,target_server,target_servers,target_group,target_groups,actor_user_id,actor_name,actor_ip,user_agent,status,error_msg)
+                VALUES (:action,:target_ip,:target_port,:comment,:target_server,:target_servers,:target_group,:target_groups,:actor_user_id,:actor_name,:actor_ip,:user_agent,:status,:error_msg)";
+    }
+
+    pdo()->prepare($sql)->execute($params);
 }
 
 // ---- Scope validation helpers ----

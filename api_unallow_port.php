@@ -52,6 +52,8 @@ try {
     logFirewall([
         'action' => 'unallow_port',
         'port' => ctype_digit($portRaw) ? (int)$portRaw : null,
+        'port_from' => (strpos($portRaw,'-')!==false) ? (int)explode('-', $portRaw, 2)[0] : null,
+        'port_to' => (strpos($portRaw,'-')!==false) ? (int)explode('-', $portRaw, 2)[1] : null,
         'comment' => (ctype_digit($portRaw) ? $comment : trim($comment === '' ? '' : ($comment.' '))."(range: {$portRaw})"),
         'target_server' => $target_server,
         'target_servers' => $target_servers,

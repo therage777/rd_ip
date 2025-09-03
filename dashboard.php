@@ -1221,12 +1221,23 @@ $stats = $pdo->query("
 							<tr>
 								<td><?php echo date('m-d H:i', strtotime($log['created_at'])); ?></td>
 								<td><?php echo htmlspecialchars($log['action']); ?></td>
-								<td>
-									<?php
-									if ($log['target_ip']) echo htmlspecialchars($log['target_ip']);
-									if ($log['target_port']) echo ':' . htmlspecialchars($log['target_port']);
-									?>
-								</td>
+                        <td>
+                            <?php
+                            $targetText = '';
+                            if (!empty($log['target_ip'])) {
+                                $targetText .= $log['target_ip'];
+                            }
+                            if (!empty($log['target_port'])) {
+                                $targetText .= ':' . $log['target_port'];
+                            } else {
+                                // 포트 범위 작업의 경우 comment에 (range: x-y)가 들어가므로 이를 표시
+                                if (!empty($log['comment']) && preg_match('/\(range:\s*([0-9]+\-[0-9]+)\)/', $log['comment'], $m)) {
+                                    $targetText = $m[1];
+                                }
+                            }
+                            echo htmlspecialchars($targetText);
+                            ?>
+                        </td>
 								<td title="<?php echo htmlspecialchars($log['comment'] ?: ''); ?>">
 									<?php
 									$comment = $log['comment'] ?: '-';

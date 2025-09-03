@@ -77,8 +77,9 @@ try {
 try {
     logFirewall([
         'action' => 'allow_port',
-        // 범위일 경우 target_port에 넣지 않고 코멘트에 남김
         'port' => ctype_digit($portRaw) ? (int)$portRaw : null,
+        'port_from' => (strpos($portRaw,'-')!==false) ? (int)explode('-', $portRaw, 2)[0] : null,
+        'port_to' => (strpos($portRaw,'-')!==false) ? (int)explode('-', $portRaw, 2)[1] : null,
         'comment' => (ctype_digit($portRaw) ? $comment : trim($comment === '' ? '' : ($comment.' '))."(range: {$portRaw})"),
         'target_server' => $target_server,
         'target_servers' => $target_servers,
