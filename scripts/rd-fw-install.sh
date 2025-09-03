@@ -79,6 +79,7 @@ SERVER_GROUPS_VAL="$(ask 'SERVER_GROUPS (콤마, 옵션)')"
 SSH_PORT="$(ask 'SSH 포트' '2197')"
 EMERGENCY_SSH_CIDR="$(ask '긴급 SSH 허용 CIDR' '210.239.60.44/32')"
 FTP_PORT="$(ask 'FTP 제어 포트' '2193')"
+ARTIFACT_VERSION="$(ask 'Agent artifacts version path (예: v1.2.3, 비우면 latest)' '')"
 
 ### 2) 패키지 설치
 if [[ $OS_FAMILY == el7 ]]; then
@@ -108,6 +109,13 @@ AGENT=/usr/local/bin/redis-fw-agent.py
 HELPER=/usr/local/bin/rd-fw-agent.sh
 CONF=/etc/redis-fw-agent.conf
 SRC_BASE="https://rdips.waba88.com/scripts/agent"
+if [[ -n "$ARTIFACT_VERSION" ]]; then SRC_BASE="$SRC_BASE/$ARTIFACT_VERSION"; fi
+
+# 검증 모드 및 고정 해시(선택)
+STRICT_VERIFY=${STRICT_VERIFY:-1}   # 1: .sha256 / 해시도구 필수, 0: 경고 후 진행
+PIN_SHA_AGENT=${PIN_SHA_AGENT:-}    # 고정 기대 해시(선택)
+PIN_SHA_HELPER=${PIN_SHA_HELPER:-}
+PIN_SHA_CONF=${PIN_SHA_CONF:-}
 
 calc_sha256() {
   local f="$1"
@@ -118,7 +126,7 @@ calc_sha256() {
 }
 
 fetch() {
-  local url="$1" dst="$2" tmp tmp_sum expected localhash
+  local url="$1" dst="$2" pin="$3" tmp tmp_sum expected localhash
   tmp="$(mktemp)"; tmp_sum="$(mktemp)"
   if command -v curl >/dev/null 2>&1; then
     curl -fsSL --retry 3 "$url" -o "$tmp" || true
@@ -143,21 +151,45 @@ fetch() {
         echo "[OK] 체크섬 검증 통과: $url"
       fi
     else
-      echo "[!] 체크섬 도구 또는 형식을 인식하지 못해 검증 생략: $url" >&2
+      if [[ "$STRICT_VERIFY" == "1" ]]; then
+        echo "[!] 체크섬 도구 부재 또는 형식 인식 실패(STRICT). 설치 중단: $url" >&2
+        rm -f "$tmp" "$tmp_sum"; exit 3
+      else
+        echo "[!] 체크섬 도구 또는 형식을 인식하지 못해 검증 생략: $url" >&2
+      fi
     fi
   else
-    echo "[!] 체크섬 파일 없음(.sha256): $url — 검증 생략" >&2
+    if [[ "$STRICT_VERIFY" == "1" ]]; then
+      echo "[!] 체크섬 파일 없음(.sha256) — STRICT 모드로 설치 중단: $url" >&2
+      rm -f "$tmp" "$tmp_sum"; exit 3
+    else
+      echo "[!] 체크섬 파일 없음(.sha256): $url — 검증 생략" >&2
+    fi
+  fi
+
+  # 고정 기대 해시가 제공된 경우 이중 검증
+  if [ -n "$pin" ]; then
+    localhash=$(calc_sha256 "$tmp" | tr 'A-F' 'a-f')
+    if [ -z "$localhash" ]; then
+      echo "[!] 해시 계산 불가 — STRICT 모드로 설치 중단: $url" >&2; rm -f "$tmp" "$tmp_sum"; exit 3
+    fi
+    if [ "$localhash" != "${pin,,}" ]; then
+      echo "[!] 고정 기대 해시 불일치 — 설치 중단: $url" >&2
+      echo "    pinned  =${pin,,}" >&2
+      echo "    actual  =$localhash" >&2
+      rm -f "$tmp" "$tmp_sum"; exit 3
+    fi
   fi
 
   install -m 0644 "$tmp" "$dst"; rm -f "$tmp" "$tmp_sum"
 }
 
 echo "[*] 에이전트/헬퍼 스크립트 다운로드"
-fetch "$SRC_BASE/redis-fw-agent.py" "$AGENT"; chmod +x "$AGENT"
-fetch "$SRC_BASE/rd-fw-agent.sh" "$HELPER"; chmod +x "$HELPER"
+fetch "$SRC_BASE/redis-fw-agent.py" "$AGENT" "$PIN_SHA_AGENT"; chmod +x "$AGENT"
+fetch "$SRC_BASE/rd-fw-agent.sh" "$HELPER" "$PIN_SHA_HELPER"; chmod +x "$HELPER"
 
 echo "[*] 기본 설정 다운로드"
-fetch "$SRC_BASE/redis-fw-agent.conf" "$CONF"; chmod 600 "$CONF"
+fetch "$SRC_BASE/redis-fw-agent.conf" "$CONF" "$PIN_SHA_CONF"; chmod 600 "$CONF"
 
 # 프롬프트 입력값으로 설정 반영
 sed -i -E "s|^REDIS_HOST=.*|REDIS_HOST=$REDIS_HOST|" "$CONF"
