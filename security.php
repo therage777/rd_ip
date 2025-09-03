@@ -332,3 +332,14 @@ function generateRandomString($length = 32)
 {
     return bin2hex(openssl_random_pseudo_bytes($length / 2));
 }
+
+/**
+ * 슈퍼관리자 여부
+ * SUPER_ADMINS 상수(콤마 구분 사용자명 목록)에 포함되면 슈퍼관리자로 간주
+ */
+function isSuperAdmin($admin)
+{
+    if (!$admin || !isset($admin['username'])) return false;
+    $list = array_map('trim', explode(',', defined('SUPER_ADMINS') ? SUPER_ADMINS : 'admin'));
+    return in_array($admin['username'], $list, true);
+}

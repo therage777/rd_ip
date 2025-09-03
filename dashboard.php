@@ -266,16 +266,136 @@ function getRuleMetadata()
 $rules = getCurrentRules();
 $ruleMetadata = getRuleMetadata();
 
+// 규칙 소유자 매핑 가져오기 (최근 생성자)
+function getRuleOwners()
+{
+    $pdo = pdo();
+    $owners = [
+        'ipports' => [], // key: "IP:PORT" => actor_user_id
+        'ips' => [],     // key: "IP" => actor_user_id
+        'ports' => [],   // key: "<n>" or "<from>-<to>" => actor_user_id
+    ];
+
+    // 1) IP:PORT 생성자
+    $sql1 = "SELECT actor_user_id, target_ip, target_port, action, created_at
+             FROM firewall_logs
+             WHERE target_ip IS NOT NULL AND target_port IS NOT NULL
+               AND action IN ('allow_ipport','block_ipport')
+             ORDER BY created_at DESC";
+    try {
+        foreach ($pdo->query($sql1) as $row) {
+            $key = $row['target_ip'] . ':' . $row['target_port'];
+            if (!isset($owners['ipports'][$key])) {
+                $owners['ipports'][$key] = (int)$row['actor_user_id'];
+            }
+        }
+    } catch (Exception $e) { /* ignore */ }
+
+    // 2) IP 생성자 (ban_ip)
+    $sql2 = "SELECT actor_user_id, target_ip, action, created_at
+             FROM firewall_logs
+             WHERE target_ip IS NOT NULL AND action IN ('ban_ip')
+             ORDER BY created_at DESC";
+    try {
+        foreach ($pdo->query($sql2) as $row) {
+            $key = $row['target_ip'];
+            if (!isset($owners['ips'][$key])) {
+                $owners['ips'][$key] = (int)$row['actor_user_id'];
+            }
+        }
+    } catch (Exception $e) { /* ignore */ }
+
+    // 3) 포트 생성자 (단일/범위)
+    // 우선 단일 포트
+    $sql3a = "SELECT actor_user_id, target_port, action, created_at
+              FROM firewall_logs
+              WHERE target_port IS NOT NULL AND action IN ('allow_port','block_port')
+              ORDER BY created_at DESC";
+    try {
+        foreach ($pdo->query($sql3a) as $row) {
+            $key = (string)((int)$row['target_port']);
+            if (!isset($owners['ports'][$key])) {
+                $owners['ports'][$key] = (int)$row['actor_user_id'];
+            }
+        }
+    } catch (Exception $e) { /* ignore */ }
+
+    // 범위 포트 (컬럼이 있을 때만)
+    try {
+        $hasRange = false;
+        try {
+            $chk = $pdo->query("SHOW COLUMNS FROM firewall_logs LIKE 'target_port_from'");
+            $hasRange = (bool)$chk->fetch();
+        } catch (Exception $ie) { $hasRange = false; }
+
+        if ($hasRange) {
+            $sql3b = "SELECT actor_user_id, target_port_from, target_port_to, action, created_at
+                      FROM firewall_logs
+                      WHERE target_port_from IS NOT NULL AND target_port_to IS NOT NULL
+                        AND action IN ('allow_port','block_port')
+                      ORDER BY created_at DESC";
+            foreach ($pdo->query($sql3b) as $row) {
+                $key = ((int)$row['target_port_from']) . '-' . ((int)$row['target_port_to']);
+                if (!isset($owners['ports'][$key])) {
+                    $owners['ports'][$key] = (int)$row['actor_user_id'];
+                }
+            }
+        }
+    } catch (Exception $e) { /* ignore */ }
+
+    return $owners;
+}
+
+$owners = getRuleOwners();
+
+// 슈퍼관리자가 아니면 본인이 생성한 항목만 표시
+if (!isSuperAdmin($admin)) {
+    $uid = (int)$admin['id'];
+    $filterByOwner = function($arr, $type) use ($owners, $uid) {
+        $out = [];
+        foreach ($arr as $item) {
+            $rule = is_array($item) ? $item['rule'] : $item;
+            $key = (string)$rule;
+            if ($type === 'ips') {
+                if (isset($owners['ips'][$key]) && $owners['ips'][$key] === $uid) $out[] = $item;
+            } elseif ($type === 'ports') {
+                if (isset($owners['ports'][$key]) && $owners['ports'][$key] === $uid) $out[] = $item;
+            } elseif ($type === 'ipports') {
+                if (isset($owners['ipports'][$key]) && $owners['ipports'][$key] === $uid) $out[] = $item;
+            }
+        }
+        return $out;
+    };
+
+    $rules['blocked_ips'] = $filterByOwner($rules['blocked_ips'], 'ips');
+    $rules['allowed_ports'] = $filterByOwner($rules['allowed_ports'], 'ports');
+    $rules['blocked_ports'] = $filterByOwner($rules['blocked_ports'], 'ports');
+    $rules['allowed_ip_ports'] = $filterByOwner($rules['allowed_ip_ports'], 'ipports');
+    $rules['blocked_ip_ports'] = $filterByOwner($rules['blocked_ip_ports'], 'ipports');
+}
+
 // 최근 로그 가져오기
 $pdo = pdo();
-$recentLogs = $pdo->query("
+if (isSuperAdmin($admin)) {
+    $recentLogs = $pdo->query("
     SELECT * FROM firewall_logs 
     ORDER BY created_at DESC 
     LIMIT 10
-")->fetchAll();
+    ")->fetchAll();
+} else {
+    $stmt = $pdo->prepare("
+    SELECT * FROM firewall_logs 
+    WHERE actor_user_id = :uid 
+    ORDER BY created_at DESC 
+    LIMIT 10
+    ");
+    $stmt->execute([':uid' => (int)$admin['id']]);
+    $recentLogs = $stmt->fetchAll();
+}
 
 // 통계 가져오기
-$stats = $pdo->query("
+if (isSuperAdmin($admin)) {
+    $stats = $pdo->query("
     SELECT 
         COUNT(*) as total_actions,
         SUM(CASE WHEN status = 'OK' THEN 1 ELSE 0 END) as success_count,
@@ -283,7 +403,21 @@ $stats = $pdo->query("
         COUNT(DISTINCT actor_ip) as unique_ips
     FROM firewall_logs 
     WHERE created_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)
-")->fetch();
+    ")->fetch();
+} else {
+    $stmt = $pdo->prepare("
+    SELECT 
+        COUNT(*) as total_actions,
+        SUM(CASE WHEN status = 'OK' THEN 1 ELSE 0 END) as success_count,
+        SUM(CASE WHEN status = 'ERR' THEN 1 ELSE 0 END) as error_count,
+        COUNT(DISTINCT actor_ip) as unique_ips
+    FROM firewall_logs 
+    WHERE created_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)
+      AND actor_user_id = :uid
+    ");
+    $stmt->execute([':uid' => (int)$admin['id']]);
+    $stats = $stmt->fetch();
+}
 ?>
 <!DOCTYPE html>
 <html lang="ko">

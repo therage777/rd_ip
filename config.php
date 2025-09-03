@@ -13,3 +13,9 @@ define('REDIS_CH',   'fw:events');
 
 // 쉐어드 비밀키(간단 보호용, POST에 같이 보냄)
 define('API_TOKEN', 'R5%2AwT7%26u2BcF3%25dGvL8%40pN2%24q');
+
+// 슈퍼관리자 사용자명 목록(콤마 구분). 여기에 포함된 계정은 대시보드에서 모든 내역을 볼 수 있습니다.
+// 기본값: 'admin'
+if (!defined('SUPER_ADMINS')) {
+    define('SUPER_ADMINS', 'admin');
+}
