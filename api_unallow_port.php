@@ -6,7 +6,7 @@ require_once __DIR__ . '/lib.php';
 $admin = getCurrentAdmin();
 if (!$admin) { echo json_encode(['ok'=>false,'err'=>'관리자 정보를 가져올 수 없습니다.']); exit; }
 
-$port    = isset($_POST['port']) ? (int)$_POST['port'] : 0;
+$portRaw = isset($_POST['port']) ? trim($_POST['port']) : '';
 $comment = isset($_POST['comment']) ? trim($_POST['comment']) : '';
 $uid     = $admin['id'];
 $uname   = $admin['name'];
@@ -21,29 +21,29 @@ if ($target_group  !== '' && !validateScopeName($target_group )) { http_response
 if ($target_servers !== '') { $norm = normalizeScopeCsv($target_servers); if ($norm===false){ http_response_code(400); echo json_encode(['ok'=>false,'err'=>'invalid target_servers']); exit; } $target_servers=$norm; }
 if ($target_groups  !== '') { $norm = normalizeScopeCsv($target_groups ); if ($norm===false){ http_response_code(400); echo json_encode(['ok'=>false,'err'=>'invalid target_groups']);  exit; } $target_groups =$norm; }
 
-if (!validPort($port)) { echo json_encode(['ok'=>false,'err'=>'invalid port']); exit; }
+if (!validPortOrRange($portRaw)) { echo json_encode(['ok'=>false,'err'=>'invalid port or range']); exit; }
 
 $ok=true; $err=null;
 
 try {
     $r = redisClient();
     if ($target_server) {
-        $r->srem("fw:allow:ports:server:{$target_server}", [$port]);
-        $msg = "unallow_port {$port} @server={$target_server}";
+        $r->srem("fw:allow:ports:server:{$target_server}", [$portRaw]);
+        $msg = "unallow_port {$portRaw} @server={$target_server}";
     } elseif ($target_servers) {
         $servers = array_filter(array_map('trim', explode(',', $target_servers)));
-        foreach ($servers as $server) if ($server!=='') $r->srem("fw:allow:ports:server:{$server}", [$port]);
-        $msg = "unallow_port {$port} @servers={$target_servers}";
+        foreach ($servers as $server) if ($server!=='') $r->srem("fw:allow:ports:server:{$server}", [$portRaw]);
+        $msg = "unallow_port {$portRaw} @servers={$target_servers}";
     } elseif ($target_group) {
-        $r->srem("fw:allow:ports:group:{$target_group}", [$port]);
-        $msg = "unallow_port {$port} @group={$target_group}";
+        $r->srem("fw:allow:ports:group:{$target_group}", [$portRaw]);
+        $msg = "unallow_port {$portRaw} @group={$target_group}";
     } elseif ($target_groups) {
         $groups = array_filter(array_map('trim', explode(',', $target_groups)));
-        foreach ($groups as $group) if ($group!=='') $r->srem("fw:allow:ports:group:{$group}", [$port]);
-        $msg = "unallow_port {$port} @groups={$target_groups}";
+        foreach ($groups as $group) if ($group!=='') $r->srem("fw:allow:ports:group:{$group}", [$portRaw]);
+        $msg = "unallow_port {$portRaw} @groups={$target_groups}";
     } else {
-        $r->srem('fw:allow:ports', [$port]);
-        $msg = "unallow_port {$port}";
+        $r->srem('fw:allow:ports', [$portRaw]);
+        $msg = "unallow_port {$portRaw}";
     }
     $r->publish(REDIS_CH, $msg);
 } catch (Exception $e) { $ok=false; $err=$e->getMessage(); }
@@ -51,8 +51,8 @@ try {
 try {
     logFirewall([
         'action' => 'unallow_port',
-        'port' => $port,
-        'comment' => $comment,
+        'port' => ctype_digit($portRaw) ? (int)$portRaw : null,
+        'comment' => (ctype_digit($portRaw) ? $comment : trim($comment === '' ? '' : ($comment.' '))."(range: {$portRaw})"),
         'target_server' => $target_server,
         'target_servers' => $target_servers,
         'target_group' => $target_group,
@@ -65,4 +65,3 @@ try {
 } catch (Exception $e) { /* ignore */ }
 
 echo json_encode(['ok'=>$ok,'err'=>$err]);
-

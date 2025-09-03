@@ -6,7 +6,7 @@ require_once __DIR__ . '/lib.php';
 // 로그인한 관리자 정보 가져오기
 $admin = getCurrentAdmin();
 
-$port = isset($_POST['port']) ? (int)$_POST['port'] : 0;
+$portRaw = isset($_POST['port']) ? trim($_POST['port']) : '';
 $comment = isset($_POST['comment']) ? trim($_POST['comment']) : '';
 
 // 관리자 정보 확인 (비활성화 등으로 null 가능)
@@ -54,9 +54,9 @@ if ($target_groups !== '') {
     $target_groups = $norm;
 }
 
-if (!validPort($port)) {
-	echo json_encode(['ok' => false, 'err' => 'invalid port']);
-	exit;
+if (!validPortOrRange($portRaw)) {
+    echo json_encode(['ok' => false, 'err' => 'invalid port or range']);
+    exit;
 }
 
 $ok = true;
@@ -66,26 +66,26 @@ try {
     $r = redisClient();
     // 전역/스코프 삭제 (에이전트 sync_all과 호환)
     if ($target_server) {
-        $r->srem("fw:block:ports:server:{$target_server}", [$port]);
+        $r->srem("fw:block:ports:server:{$target_server}", [$portRaw]);
     } elseif ($target_servers) {
         $servers = array_filter(array_map('trim', explode(',', $target_servers)));
         foreach ($servers as $server) {
             if ($server !== '') {
-                $r->srem("fw:block:ports:server:{$server}", [$port]);
+                $r->srem("fw:block:ports:server:{$server}", [$portRaw]);
             }
         }
     } elseif ($target_group) {
-        $r->srem("fw:block:ports:group:{$target_group}", [$port]);
+        $r->srem("fw:block:ports:group:{$target_group}", [$portRaw]);
     } elseif ($target_groups) {
         $groups = array_filter(array_map('trim', explode(',', $target_groups)));
         foreach ($groups as $group) {
             if ($group !== '') {
-                $r->srem("fw:block:ports:group:{$group}", [$port]);
+                $r->srem("fw:block:ports:group:{$group}", [$portRaw]);
             }
         }
     } else {
         // 전체 서버 (기본)
-        $r->srem('fw:block:ports', [$port]);
+        $r->srem('fw:block:ports', [$portRaw]);
     }
 
     // Build publish message with scope
@@ -107,9 +107,9 @@ try {
 }
 
 logFirewall([
-	'action' => 'unblock_port',
-	'port' => $port,
-	'comment' => $comment,
+    'action' => 'unblock_port',
+    'port' => ctype_digit($portRaw) ? (int)$portRaw : null,
+    'comment' => (ctype_digit($portRaw) ? $comment : trim($comment === '' ? '' : ($comment.' '))."(range: {$portRaw})"),
 	'uid' => $uid,
 	'uname' => $uname,
 	'status' => $ok ? 'OK' : 'ERR',

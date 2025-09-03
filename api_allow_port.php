@@ -10,7 +10,7 @@ if (!$admin) {
     exit;
 }
 
-$port    = isset($_POST['port']) ? (int)$_POST['port'] : 0;
+$portRaw = isset($_POST['port']) ? trim($_POST['port']) : '';
 $comment = isset($_POST['comment']) ? trim($_POST['comment']) : '';
 $uid     = $admin['id'];
 $uname   = $admin['name'];
@@ -43,8 +43,8 @@ if ($target_groups !== '') {
     $target_groups = $norm;
 }
 
-if (!validPort($port)) {
-    echo json_encode(['ok' => false, 'err' => 'invalid port']);
+if (!validPortOrRange($portRaw)) {
+    echo json_encode(['ok' => false, 'err' => 'invalid port or range']);
     exit;
 }
 
@@ -54,22 +54,22 @@ try {
     $r = redisClient();
     // 스코프별 저장
     if ($target_server) {
-        $r->sadd("fw:allow:ports:server:{$target_server}", [$port]);
-        $msg = "allow_port {$port} @server={$target_server}";
+        $r->sadd("fw:allow:ports:server:{$target_server}", [$portRaw]);
+        $msg = "allow_port {$portRaw} @server={$target_server}";
     } elseif ($target_servers) {
         $servers = array_filter(array_map('trim', explode(',', $target_servers)));
-        foreach ($servers as $server) if ($server !== '') $r->sadd("fw:allow:ports:server:{$server}", [$port]);
-        $msg = "allow_port {$port} @servers={$target_servers}";
+        foreach ($servers as $server) if ($server !== '') $r->sadd("fw:allow:ports:server:{$server}", [$portRaw]);
+        $msg = "allow_port {$portRaw} @servers={$target_servers}";
     } elseif ($target_group) {
-        $r->sadd("fw:allow:ports:group:{$target_group}", [$port]);
-        $msg = "allow_port {$port} @group={$target_group}";
+        $r->sadd("fw:allow:ports:group:{$target_group}", [$portRaw]);
+        $msg = "allow_port {$portRaw} @group={$target_group}";
     } elseif ($target_groups) {
         $groups = array_filter(array_map('trim', explode(',', $target_groups)));
-        foreach ($groups as $group) if ($group !== '') $r->sadd("fw:allow:ports:group:{$group}", [$port]);
-        $msg = "allow_port {$port} @groups={$target_groups}";
+        foreach ($groups as $group) if ($group !== '') $r->sadd("fw:allow:ports:group:{$group}", [$portRaw]);
+        $msg = "allow_port {$portRaw} @groups={$target_groups}";
     } else {
-        $r->sadd('fw:allow:ports', [$port]);
-        $msg = "allow_port {$port}";
+        $r->sadd('fw:allow:ports', [$portRaw]);
+        $msg = "allow_port {$portRaw}";
     }
     $r->publish(REDIS_CH, $msg);
 } catch (Exception $e) { $ok=false; $err=$e->getMessage(); }
@@ -77,8 +77,9 @@ try {
 try {
     logFirewall([
         'action' => 'allow_port',
-        'port' => $port,
-        'comment' => $comment,
+        // 범위일 경우 target_port에 넣지 않고 코멘트에 남김
+        'port' => ctype_digit($portRaw) ? (int)$portRaw : null,
+        'comment' => (ctype_digit($portRaw) ? $comment : trim($comment === '' ? '' : ($comment.' '))."(range: {$portRaw})"),
         'target_server' => $target_server,
         'target_servers' => $target_servers,
         'target_group' => $target_group,
@@ -91,4 +92,3 @@ try {
 } catch (Exception $e) { /* ignore logging error */ }
 
 echo json_encode(['ok' => $ok, 'err' => $err]);
-

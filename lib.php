@@ -67,6 +67,27 @@ function validPort($p)
     return is_numeric($p) && $p >= 1 && $p <= 65535;
 }
 
+// 포트 또는 포트 범위(예: "20000-30000") 유효성 검사
+function validPortOrRange($s)
+{
+    $s = trim((string)$s);
+    if ($s === '') return false;
+    if (ctype_digit($s)) {
+        $n = (int)$s;
+        return $n >= 1 && $n <= 65535;
+    }
+    if (strpos($s, '-') !== false) {
+        list($a, $b) = array_map('trim', explode('-', $s, 2));
+        if ($a === '' || $b === '') return false;
+        if (!ctype_digit($a) || !ctype_digit($b)) return false;
+        $ia = (int)$a; $ib = (int)$b;
+        if ($ia < 1 || $ia > 65535 || $ib < 1 || $ib > 65535) return false;
+        if ($ia > $ib) return false;
+        return true;
+    }
+    return false;
+}
+
 function logFirewall($data)
 {
     $sql = "INSERT INTO firewall_logs

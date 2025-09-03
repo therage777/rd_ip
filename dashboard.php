@@ -1000,7 +1000,7 @@ $stats = $pdo->query("
 							<option value="group">서버 그룹</option>
 							<option value="groups">여러 서버 그룹</option>
 						</select>
-						<input type="number" class="form-input" id="port-input" placeholder="예: 8080" min="1" max="65535" required>
+						<input type="text" class="form-input" id="port-input" placeholder="예: 8080 또는 20000-30000" required>
 						<input type="text" class="form-input" id="port-comment-input" placeholder="메모 (선택)" style="flex: 1.5;">
 						<button type="submit" class="btn btn-primary">차단 추가</button>
 					</form>
@@ -1062,7 +1062,7 @@ $stats = $pdo->query("
 							<option value="group">서버 그룹</option>
 							<option value="groups">여러 서버 그룹</option>
 						</select>
-						<input type="number" class="form-input" id="allowport-input" placeholder="예: 8080" min="1" max="65535" required>
+						<input type="text" class="form-input" id="allowport-input" placeholder="예: 8080 또는 20000-30000" required>
 						<input type="text" class="form-input" id="allowport-comment-input" placeholder="메모 (선택)" style="flex: 1.5;">
 						<button type="submit" class="btn btn-primary" style="background:#48bb78;">허용 추가</button>
 					</form>
