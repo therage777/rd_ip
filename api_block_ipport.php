@@ -9,6 +9,13 @@ $admin = getCurrentAdmin();
 $ip      = isset($_POST['ip'])   ? trim($_POST['ip'])   : '';
 $port    = isset($_POST['port']) ? (int)$_POST['port']  : 0;
 $comment = isset($_POST['comment']) ? trim($_POST['comment']) : '';
+
+// 관리자 정보 확인 (비활성화 등으로 null 가능)
+if (!$admin) {
+    echo json_encode(['ok' => false, 'err' => '관리자 정보를 가져올 수 없습니다.']);
+    exit;
+}
+
 $uid     = $admin['id'];
 $uname   = $admin['name'];
 
@@ -17,6 +24,36 @@ $target_server = isset($_POST['target_server']) ? trim($_POST['target_server']) 
 $target_servers = isset($_POST['target_servers']) ? trim($_POST['target_servers']) : '';
 $target_group = isset($_POST['target_group']) ? trim($_POST['target_group']) : '';
 $target_groups = isset($_POST['target_groups']) ? trim($_POST['target_groups']) : '';
+
+// 스코프 값 검증 및 정규화
+if ($target_server !== '' && !validateScopeName($target_server)) {
+    http_response_code(400);
+    echo json_encode(['ok' => false, 'err' => 'invalid target_server']);
+    exit;
+}
+if ($target_group !== '' && !validateScopeName($target_group)) {
+    http_response_code(400);
+    echo json_encode(['ok' => false, 'err' => 'invalid target_group']);
+    exit;
+}
+if ($target_servers !== '') {
+    $norm = normalizeScopeCsv($target_servers);
+    if ($norm === false) {
+        http_response_code(400);
+        echo json_encode(['ok' => false, 'err' => 'invalid target_servers']);
+        exit;
+    }
+    $target_servers = $norm;
+}
+if ($target_groups !== '') {
+    $norm = normalizeScopeCsv($target_groups);
+    if ($norm === false) {
+        http_response_code(400);
+        echo json_encode(['ok' => false, 'err' => 'invalid target_groups']);
+        exit;
+    }
+    $target_groups = $norm;
+}
 
 if (!validIp($ip)) {
 	echo json_encode(['ok' => false, 'err' => 'invalid ip']);

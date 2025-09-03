@@ -6,7 +6,7 @@ require_once __DIR__ . '/lib.php';
 
 try {
 	$r = redisClient();
-	$ips   = $r->smembers('fw:blacklist:ips');
+    $ips   = $r->smembers('fw:black_ips');
 	$ports = $r->smembers('fw:block:ports');
 
 	// Predis가 PHP5.6에서 반환하는 값은 string 배열일 수 있음

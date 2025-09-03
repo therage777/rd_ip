@@ -89,3 +89,26 @@ function logFirewall($data)
         ':error_msg' => isset($data['error']) ? substr($data['error'], 0, 250) : null,
     ]);
 }
+
+// ---- Scope validation helpers ----
+// Allow only letters, digits, underscore, hyphen, dot. Limit length to 64.
+function validateScopeName($name)
+{
+    if (!is_string($name)) return false;
+    $name = trim($name);
+    if ($name === '') return false;
+    return preg_match('/^[A-Za-z0-9_.-]{1,64}$/', $name) === 1;
+}
+
+// Normalize comma-separated list: trim, deduplicate, validate all.
+// Returns normalized CSV string or false on invalid.
+function normalizeScopeCsv($csv)
+{
+    if (!is_string($csv) || trim($csv) === '') return '';
+    $items = array_filter(array_map('trim', explode(',', $csv)), 'strlen');
+    $items = array_values(array_unique($items));
+    foreach ($items as $it) {
+        if (!validateScopeName($it)) return false;
+    }
+    return implode(',', $items);
+}

@@ -12,26 +12,31 @@ function getCurrentRules()
 		$r = redisClient();
 		
 		// 기본 규칙 (전체 서버)
-		$rules = [
-			'blocked_ips' => [],
-			'blocked_ports' => [],
-			'blocked_ip_ports' => [],
-			'allowed_ip_ports' => []
-		];
+        $rules = [
+            'blocked_ips' => [],
+            'blocked_ports' => [],
+            'allowed_ports' => [],
+            'blocked_ip_ports' => [],
+            'allowed_ip_ports' => []
+        ];
 		
-		// 전체 서버 규칙
-		$global_blocked_ips = $r->smembers('fw:blacklist:ips') ?: [];
-		$global_blocked_ports = $r->smembers('fw:block:ports') ?: [];
+        // 전체 서버 규칙
+        $global_blocked_ips = $r->smembers('fw:black_ips') ?: [];
+        $global_blocked_ports = $r->smembers('fw:block:ports') ?: [];
+        $global_allowed_ports = $r->smembers('fw:allow:ports') ?: [];
 		$global_blocked_ipports = $r->smembers('fw:block:ipports') ?: [];
 		$global_allowed_ipports = $r->smembers('fw:allow:ipports') ?: [];
 		
 		// 규칙에 타겟 정보 추가
-		foreach ($global_blocked_ips as $ip) {
-			$rules['blocked_ips'][] = ['rule' => $ip, 'target' => 'all'];
-		}
-		foreach ($global_blocked_ports as $port) {
-			$rules['blocked_ports'][] = ['rule' => $port, 'target' => 'all'];
-		}
+        foreach ($global_blocked_ips as $ip) {
+            $rules['blocked_ips'][] = ['rule' => $ip, 'target' => 'all'];
+        }
+        foreach ($global_blocked_ports as $port) {
+            $rules['blocked_ports'][] = ['rule' => $port, 'target' => 'all'];
+        }
+        foreach ($global_allowed_ports as $port) {
+            $rules['allowed_ports'][] = ['rule' => $port, 'target' => 'all'];
+        }
 		foreach ($global_blocked_ipports as $ipport) {
 			$rules['blocked_ip_ports'][] = ['rule' => $ipport, 'target' => 'all'];
 		}
@@ -39,8 +44,8 @@ function getCurrentRules()
 			$rules['allowed_ip_ports'][] = ['rule' => $ipport, 'target' => 'all'];
 		}
 		
-		// 서버별/그룹별 키 패턴 검색
-		// fw:allow:ipports:server:* 와 fw:allow:ipports:group:* 패턴 검색
+        // 서버별/그룹별 키 패턴 검색
+        // fw:allow:ipports:server:* 와 fw:allow:ipports:group:* 패턴 검색
 		try {
 			$server_keys = $r->keys('fw:allow:ipports:server:*');
 			if ($server_keys) {
@@ -108,9 +113,102 @@ function getCurrentRules()
 			}
 		} catch (Exception $e) {
 			// keys 명령어 실패시 무시
-		}
-		
-		return $rules;
+        }
+
+        // fw:allow:ports:server:* / fw:allow:ports:group:* (포트 허용 스코프)
+        try {
+            $server_keys = $r->keys('fw:allow:ports:server:*');
+            if ($server_keys) {
+                foreach ($server_keys as $key) {
+                    $server = str_replace('fw:allow:ports:server:', '', $key);
+                    $ports = $r->smembers($key);
+                    if ($ports) {
+                        foreach ($ports as $p) {
+                            $rules['allowed_ports'][] = ['rule' => $p, 'target' => 'server', 'target_value' => $server];
+                        }
+                    }
+                }
+            }
+        } catch (Exception $e) { /* ignore */ }
+
+        try {
+            $group_keys = $r->keys('fw:allow:ports:group:*');
+            if ($group_keys) {
+                foreach ($group_keys as $key) {
+                    $group = str_replace('fw:allow:ports:group:', '', $key);
+                    $ports = $r->smembers($key);
+                    if ($ports) {
+                        foreach ($ports as $p) {
+                            $rules['allowed_ports'][] = ['rule' => $p, 'target' => 'group', 'target_value' => $group];
+                        }
+                    }
+                }
+            }
+        } catch (Exception $e) { /* ignore */ }
+
+        // fw:black_ips:server:* / fw:black_ips:group:* (IP 차단 스코프)
+        try {
+            $server_keys = $r->keys('fw:black_ips:server:*');
+            if ($server_keys) {
+                foreach ($server_keys as $key) {
+                    $server = str_replace('fw:black_ips:server:', '', $key);
+                    $ips = $r->smembers($key);
+                    if ($ips) {
+                        foreach ($ips as $ip) {
+                            $rules['blocked_ips'][] = ['rule' => $ip, 'target' => 'server', 'target_value' => $server];
+                        }
+                    }
+                }
+            }
+        } catch (Exception $e) { /* ignore */ }
+
+        try {
+            $group_keys = $r->keys('fw:black_ips:group:*');
+            if ($group_keys) {
+                foreach ($group_keys as $key) {
+                    $group = str_replace('fw:black_ips:group:', '', $key);
+                    $ips = $r->smembers($key);
+                    if ($ips) {
+                        foreach ($ips as $ip) {
+                            $rules['blocked_ips'][] = ['rule' => $ip, 'target' => 'group', 'target_value' => $group];
+                        }
+                    }
+                }
+            }
+        } catch (Exception $e) { /* ignore */ }
+
+        // fw:block:ports:server:* / fw:block:ports:group:* (포트 차단 스코프)
+        try {
+            $server_keys = $r->keys('fw:block:ports:server:*');
+            if ($server_keys) {
+                foreach ($server_keys as $key) {
+                    $server = str_replace('fw:block:ports:server:', '', $key);
+                    $ports = $r->smembers($key);
+                    if ($ports) {
+                        foreach ($ports as $p) {
+                            $rules['blocked_ports'][] = ['rule' => $p, 'target' => 'server', 'target_value' => $server];
+                        }
+                    }
+                }
+            }
+        } catch (Exception $e) { /* ignore */ }
+
+        try {
+            $group_keys = $r->keys('fw:block:ports:group:*');
+            if ($group_keys) {
+                foreach ($group_keys as $key) {
+                    $group = str_replace('fw:block:ports:group:', '', $key);
+                    $ports = $r->smembers($key);
+                    if ($ports) {
+                        foreach ($ports as $p) {
+                            $rules['blocked_ports'][] = ['rule' => $p, 'target' => 'group', 'target_value' => $group];
+                        }
+                    }
+                }
+            }
+        } catch (Exception $e) { /* ignore */ }
+
+        return $rules;
 	} catch (Exception $e) {
 		return [
 			'blocked_ips' => [],
@@ -854,28 +952,40 @@ $stats = $pdo->query("
 								<p>차단된 IP가 없습니다</p>
 							</div>
 						<?php else: ?>
-							<?php foreach ($rules['blocked_ips'] as $rule_data): ?>
-								<?php
-								$ip = $rule_data['rule'];
-								$comment = isset($ruleMetadata[$ip]['comment']) ? $ruleMetadata[$ip]['comment'] : '';
-								$targetType = $rule_data['target'];
-								?>
-								<div class="rule-item" id="ip-<?php echo md5($ip); ?>" data-target-type="<?php echo htmlspecialchars($targetType); ?>">
-									<div style="flex: 1;">
-										<span class="rule-text"><?php echo htmlspecialchars($ip); ?></span>
-										<?php if ($comment): ?>
-											<span class="rule-memo"><?php echo htmlspecialchars($comment); ?></span>
-										<?php endif; ?>
-									</div>
-									<button class="btn btn-danger btn-sm" onclick="unblockIP('<?php echo htmlspecialchars($ip); ?>')">해제</button>
-								</div>
-							<?php endforeach; ?>
+                            <?php foreach ($rules['blocked_ips'] as $rule_data): ?>
+                                <?php
+                                $ip = is_array($rule_data) ? $rule_data['rule'] : $rule_data;
+                                $comment = isset($ruleMetadata[$ip]['comment']) ? $ruleMetadata[$ip]['comment'] : '';
+                                $targetType = 'all';
+                                $targetValue = '';
+                                if (is_array($rule_data)) {
+                                    $targetType = isset($rule_data['target']) ? $rule_data['target'] : 'all';
+                                    $targetValue = isset($rule_data['target_value']) ? $rule_data['target_value'] : '';
+                                }
+
+                                $displayText = htmlspecialchars($ip);
+                                if ($targetType === 'server' && $targetValue) {
+                                    $displayText .= ' <span style="color: #667eea;">[@' . htmlspecialchars($targetValue) . ']</span>';
+                                } elseif ($targetType === 'group' && $targetValue) {
+                                    $displayText .= ' <span style="color: #48bb78;">[#' . htmlspecialchars($targetValue) . ']</span>';
+                                }
+                                ?>
+                                <div class="rule-item" id="ip-<?php echo md5($ip . '|' . $targetType . '|' . $targetValue); ?>" data-target-type="<?php echo htmlspecialchars($targetType); ?>">
+                                    <div style="flex: 1;">
+                                        <span class="rule-text"><?php echo $displayText; ?></span>
+                                        <?php if ($comment): ?>
+                                            <span class="rule-memo"><?php echo htmlspecialchars($comment); ?></span>
+                                        <?php endif; ?>
+                                    </div>
+                                    <button class="btn btn-danger btn-sm" onclick="unblockIP('<?php echo htmlspecialchars($ip); ?>','<?php echo htmlspecialchars($targetType); ?>','<?php echo htmlspecialchars($targetValue); ?>')">해제</button>
+                                </div>
+                            <?php endforeach; ?>
 						<?php endif; ?>
 					</div>
 				</div>
 			</div>
 
-			<!-- 포트 차단 관리 -->
+		<!-- 포트 차단 관리 -->
 			<div class="card">
 				<div class="card-header">
 					<h3 class="card-title">🔒 포트 차단 관리</h3>
@@ -904,27 +1014,101 @@ $stats = $pdo->query("
 								<p>차단된 포트가 없습니다</p>
 							</div>
 						<?php else: ?>
-							<?php foreach ($rules['blocked_ports'] as $rule_data): ?>
+                            <?php foreach ($rules['blocked_ports'] as $rule_data): ?>
+                                <?php
+                                $port = is_array($rule_data) ? $rule_data['rule'] : $rule_data;
+                                $portKey = ':' . $port;
+                                $comment = isset($ruleMetadata[$portKey]['comment']) ? $ruleMetadata[$portKey]['comment'] : '';
+                                $targetType = 'all';
+                                $targetValue = '';
+                                if (is_array($rule_data)) {
+                                    $targetType = isset($rule_data['target']) ? $rule_data['target'] : 'all';
+                                    $targetValue = isset($rule_data['target_value']) ? $rule_data['target_value'] : '';
+                                }
+
+                                $displayText = '포트 ' . htmlspecialchars($port);
+                                if ($targetType === 'server' && $targetValue) {
+                                    $displayText .= ' <span style="color: #667eea;">[@' . htmlspecialchars($targetValue) . ']</span>';
+                                } elseif ($targetType === 'group' && $targetValue) {
+                                    $displayText .= ' <span style="color: #48bb78;">[#' . htmlspecialchars($targetValue) . ']</span>';
+                                }
+                                ?>
+                                <div class="rule-item" id="port-<?php echo htmlspecialchars($port) . '-' . md5($targetType . '|' . $targetValue); ?>" data-target-type="<?php echo htmlspecialchars($targetType); ?>">
+                                    <div style="flex: 1;">
+                                        <span class="rule-text"><?php echo $displayText; ?></span>
+                                        <?php if ($comment): ?>
+                                            <span class="rule-memo"><?php echo htmlspecialchars($comment); ?></span>
+                                        <?php endif; ?>
+                                    </div>
+                                    <button class="btn btn-danger btn-sm" onclick="unblockPort('<?php echo htmlspecialchars($port); ?>','<?php echo htmlspecialchars($targetType); ?>','<?php echo htmlspecialchars($targetValue); ?>')">해제</button>
+                                </div>
+                            <?php endforeach; ?>
+						<?php endif; ?>
+			</div>
+		</div>
+
+			<!-- 포트 허용 관리 -->
+			<div class="card">
+				<div class="card-header">
+					<h3 class="card-title">✅ 포트 허용 관리</h3>
+					<span class="badge badge-port" style="background:#c6f6d5; color:#22543d;"><?php echo count($rules['allowed_ports']); ?>개</span>
+				</div>
+				<div class="card-body">
+					<form class="form-inline" onsubmit="return allowPort(event)">
+						<select class="target-select-inline" id="allowport-target-type">
+							<option value="all">전체 서버</option>
+							<option value="server">특정 서버</option>
+							<option value="servers">여러 서버</option>
+							<option value="group">서버 그룹</option>
+							<option value="groups">여러 서버 그룹</option>
+						</select>
+						<input type="number" class="form-input" id="allowport-input" placeholder="예: 8080" min="1" max="65535" required>
+						<input type="text" class="form-input" id="allowport-comment-input" placeholder="메모 (선택)" style="flex: 1.5;">
+						<button type="submit" class="btn btn-primary" style="background:#48bb78;">허용 추가</button>
+					</form>
+
+					<div class="rule-list">
+						<?php if (empty($rules['allowed_ports'])): ?>
+							<div class="empty-state">
+								<svg fill="currentColor" viewBox="0 0 20 20">
+									<path d="M13.477 14.89A6 6 0 015.11 6.524l8.367 8.368zm1.414-1.414L6.524 5.11a6 6 0 018.367 8.367zM18 10a8 8 0 11-16 0 8 8 0 0116 0z" />
+								</svg>
+								<p>허용된 포트가 없습니다</p>
+							</div>
+						<?php else: ?>
+							<?php foreach ($rules['allowed_ports'] as $rule_data): ?>
 								<?php
-								$port = $rule_data['rule'];
+								$port = is_array($rule_data) ? $rule_data['rule'] : $rule_data;
 								$portKey = ':' . $port;
 								$comment = isset($ruleMetadata[$portKey]['comment']) ? $ruleMetadata[$portKey]['comment'] : '';
-								$targetType = $rule_data['target'];
+								$targetType = 'all';
+								$targetValue = '';
+								if (is_array($rule_data)) {
+									$targetType = isset($rule_data['target']) ? $rule_data['target'] : 'all';
+									$targetValue = isset($rule_data['target_value']) ? $rule_data['target_value'] : '';
+								}
+								$displayText = '포트 ' . htmlspecialchars($port);
+								if ($targetType === 'server' && $targetValue) {
+									$displayText .= ' <span style="color: #667eea;">[@' . htmlspecialchars($targetValue) . ']</span>';
+								} elseif ($targetType === 'group' && $targetValue) {
+									$displayText .= ' <span style="color: #48bb78;">[#' . htmlspecialchars($targetValue) . ']</span>';
+								}
 								?>
-								<div class="rule-item" id="port-<?php echo $port; ?>" data-target-type="<?php echo htmlspecialchars($targetType); ?>">
+								<div class="rule-item" id="allowport-<?php echo htmlspecialchars($port) . '-' . md5($targetType . '|' . $targetValue); ?>" data-target-type="<?php echo htmlspecialchars($targetType); ?>">
 									<div style="flex: 1;">
-										<span class="rule-text">포트 <?php echo htmlspecialchars($port); ?></span>
+										<span class="rule-text"><?php echo $displayText; ?></span>
 										<?php if ($comment): ?>
 											<span class="rule-memo"><?php echo htmlspecialchars($comment); ?></span>
 										<?php endif; ?>
 									</div>
-									<button class="btn btn-danger btn-sm" onclick="unblockPort('<?php echo htmlspecialchars($port); ?>')">해제</button>
+									<button class="btn btn-danger btn-sm" onclick="unallowPort('<?php echo htmlspecialchars($port); ?>','<?php echo htmlspecialchars($targetType); ?>','<?php echo htmlspecialchars($targetValue); ?>')">허용 해제</button>
 								</div>
 							<?php endforeach; ?>
 						<?php endif; ?>
 					</div>
 				</div>
 			</div>
+		</div>
 		</div>
 
 		<!-- IP:PORT 차단 관리 섹션 (블랙리스트) -->
@@ -1326,16 +1510,17 @@ $stats = $pdo->query("
 			return false;
 		}
 
-		function unblockIP(ip) {
-			if (!confirm(`정말로 ${ip}의 차단을 해제하시겠습니까?`)) {
-				return;
-			}
+        function unblockIP(ip, targetType = 'all', targetValue = '') {
+            if (!confirm(`정말로 ${ip}${targetType==='server'&&targetValue?`[@${targetValue}]`:''}${targetType==='group'&&targetValue?`[#${targetValue}]`:''}의 차단을 해제하시겠습니까?`)) {
+                return;
+            }
 
-			apiCall('api_del_ip.php', {
-				ip: ip,
-				comment: '대시보드에서 해제'
-			});
-		}
+            const data = { ip: ip, comment: '대시보드에서 해제' };
+            if (targetType === 'server' && targetValue) data.target_server = targetValue;
+            else if (targetType === 'group' && targetValue) data.target_group = targetValue;
+
+            apiCall('api_del_ip.php', data);
+        }
 
 		function blockPort(event) {
 			event.preventDefault();
@@ -1356,16 +1541,39 @@ $stats = $pdo->query("
 			return false;
 		}
 
-		function unblockPort(port) {
-			if (!confirm(`정말로 포트 ${port}의 차단을 해제하시겠습니까?`)) {
+		function allowPort(event) {
+			event.preventDefault();
+			const port = document.getElementById('allowport-input').value;
+			const comment = document.getElementById('allowport-comment-input').value || '대시보드에서 허용 추가';
+			const targetType = document.getElementById('allowport-target-type').value;
+
+			const data = { port: port, comment: comment };
+			addTargetParams(data, targetType);
+			apiCall('api_allow_port.php', data);
+
+			return false;
+		}
+
+		function unallowPort(port, targetType = 'all', targetValue = '') {
+			if (!confirm(`정말로 포트 ${port}${targetType==='server'&&targetValue?`[@${targetValue}]`:''}${targetType==='group'&&targetValue?`[#${targetValue}]`:''}의 허용을 해제하시겠습니까?`)) {
 				return;
 			}
-
-			apiCall('api_unblock_port.php', {
-				port: port,
-				comment: '대시보드에서 해제'
-			});
+			const data = { port: port, comment: '대시보드에서 허용 해제' };
+			if (targetType === 'server' && targetValue) data.target_server = targetValue;
+			else if (targetType === 'group' && targetValue) data.target_group = targetValue;
+			apiCall('api_unallow_port.php', data);
 		}
+
+        function unblockPort(port, targetType = 'all', targetValue = '') {
+            if (!confirm(`정말로 포트 ${port}${targetType==='server'&&targetValue?`[@${targetValue}]`:''}${targetType==='group'&&targetValue?`[#${targetValue}]`:''}의 차단을 해제하시겠습니까?`)) {
+                return;
+            }
+
+            const data = { port: port, comment: '대시보드에서 해제' };
+            if (targetType === 'server' && targetValue) data.target_server = targetValue;
+            else if (targetType === 'group' && targetValue) data.target_group = targetValue;
+            apiCall('api_unblock_port.php', data);
+        }
 
 		function blockIPPort(event) {
 			event.preventDefault();
