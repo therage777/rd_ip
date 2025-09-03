@@ -109,12 +109,47 @@ HELPER=/usr/local/bin/rd-fw-agent.sh
 CONF=/etc/redis-fw-agent.conf
 SRC_BASE="https://rdips.waba88.com/scripts/agent"
 
+calc_sha256() {
+  local f="$1"
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$f" | awk '{print $1}';
+  elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$f" | awk '{print $1}';
+  elif command -v openssl >/dev/null 2>&1; then openssl dgst -sha256 -r "$f" | awk '{print $1}';
+  else echo ""; fi
+}
+
 fetch() {
-  local url="$1" dst="$2" tmp
-  tmp="$(mktemp)"
-  if command -v curl >/dev/null 2>&1; then curl -fsSL --retry 3 "$url" -o "$tmp"; else wget -q "$url" -O "$tmp"; fi
-  [ -s "$tmp" ] || { echo "[!] 다운로드 실패: $url" >&2; exit 2; }
-  install -m 0644 "$tmp" "$dst"; rm -f "$tmp"
+  local url="$1" dst="$2" tmp tmp_sum expected localhash
+  tmp="$(mktemp)"; tmp_sum="$(mktemp)"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL --retry 3 "$url" -o "$tmp" || true
+    curl -fsSL --retry 3 "$url.sha256" -o "$tmp_sum" || true
+  else
+    wget -q "$url" -O "$tmp" || true
+    wget -q "$url.sha256" -O "$tmp_sum" || true
+  fi
+  [ -s "$tmp" ] || { echo "[!] 다운로드 실패: $url" >&2; rm -f "$tmp" "$tmp_sum"; exit 2; }
+
+  # 체크섬 검증 (가능한 경우)
+  if [ -s "$tmp_sum" ]; then
+    expected=$(awk '{for(i=1;i<=NF;i++){ if (length($i)==64 && $i ~ /^[0-9A-Fa-f]+$/){print tolower($i); exit}}}' "$tmp_sum")
+    localhash=$(calc_sha256 "$tmp" | tr 'A-F' 'a-f')
+    if [ -n "$expected" ] && [ -n "$localhash" ]; then
+      if [ "$expected" != "$localhash" ]; then
+        echo "[!] SHA256 불일치: $url" >&2
+        echo "    expected=$expected" >&2
+        echo "    actual  =$localhash" >&2
+        rm -f "$tmp" "$tmp_sum"; exit 3
+      else
+        echo "[OK] 체크섬 검증 통과: $url"
+      fi
+    else
+      echo "[!] 체크섬 도구 또는 형식을 인식하지 못해 검증 생략: $url" >&2
+    fi
+  else
+    echo "[!] 체크섬 파일 없음(.sha256): $url — 검증 생략" >&2
+  fi
+
+  install -m 0644 "$tmp" "$dst"; rm -f "$tmp" "$tmp_sum"
 }
 
 echo "[*] 에이전트/헬퍼 스크립트 다운로드"
@@ -138,183 +173,7 @@ if [[ -n "$SERVER_GROUPS_VAL" ]]; then sed -i -E "s|^SERVER_GROUPS=.*|SERVER_GRO
 # SSH를 보호 포트에 포함 보장
 if grep -q '^PROTECTED_PORTS=' "$CONF"; then sed -i -E "s|^PROTECTED_PORTS=.*|PROTECTED_PORTS=$SSH_PORT|" "$CONF"; else echo "PROTECTED_PORTS=$SSH_PORT" >> "$CONF"; fi
 
-# (백업용) 내장 에이전트 코드 — 현재는 비활성
-if false; then
-cat > "$AGENT" <<'PYEOF'
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-import os, sys, subprocess, socket
-LOG_LEVEL=os.getenv("LOG_LEVEL","INFO").upper()
-_LEVELS={"DEBUG":10,"INFO":20,"WARN":30,"ERROR":40,"NONE":100}
-def _log(l,m): 
-    (sys.stderr if l in ("ERROR","WARN") else sys.stdout).write("[redis-fw-agent] %s\n"%m) if _LEVELS.get(l,20)>=_LEVELS.get(LOG_LEVEL,20) else None
-SERVER_ID=os.getenv("SERVER_ID",socket.gethostname())
-SERVER_GROUPS=[g.strip() for g in os.getenv("SERVER_GROUPS","").split(",") if g.strip()]
-REDIS_HOST=os.getenv("REDIS_HOST","42.125.244.4")
-REDIS_PORT=int(os.getenv("REDIS_PORT","6379"))
-REDIS_DB=int(os.getenv("REDIS_DB","0"))
-REDIS_PASS=os.getenv("REDIS_PASS",None)
-CHANNEL=os.getenv("FW_CHANNEL","fw:events")
-K_BLACK_IPS="fw:black_ips"; K_BLOCK_PORTS="fw:block:ports"; K_ALLOW_PORTS="fw:allow:ports"; K_ALLOW_IPPORTS="fw:allow:ipports"; K_BLOCK_IPPORTS="fw:block:ipports"
-SET_BLACK_IPS="fw_black_ips"; SET_BLOCK_PORTS="fw_block_ports"; SET_ALLOW_PORTS="fw_allow_ports"; SET_ALLOW_IPPORTS="fw_allow_ipports"; SET_BLOCK_IPPORTS="fw_block_ipports"
-def sh(c):
-    p=subprocess.Popen(c,shell=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE); o,e=p.communicate()
-    if p.returncode!=0: raise RuntimeError("%s\n%s"%(c,e.decode()))
-    return o.decode()
-def try_sh(c):
-    try: return sh(c)
-    except Exception as e: _log("DEBUG","cmd failed: %s"%e); return ""
-def ensure_sets():
-    try_sh(f"ipset create {SET_BLACK_IPS} hash:ip -exist")
-    try_sh(f"ipset create {SET_BLOCK_PORTS} bitmap:port range 0-65535 -exist")
-    try_sh(f"ipset create {SET_ALLOW_PORTS} bitmap:port range 0-65535 -exist")
-    try_sh(f"ipset create {SET_ALLOW_IPPORTS} hash:ip,port -exist")
-    try_sh(f"ipset create {SET_BLOCK_IPPORTS} hash:ip,port -exist")
-def add_ipport(s,ip,p): try_sh(f"ipset add {s} {ip},tcp:{p} -exist")
-def del_ipport(s,ip,p): try_sh(f"ipset del {s} {ip},tcp:{p} -exist")
-
-# ---- Helpers (flags/scope/protected) ----
-def has_flag(parts, name):
-    flag = "@%s" % name
-    return any(t.strip() == flag for t in parts)
-
-def is_protected_port(port):
-    pro = set([x.strip() for x in (os.getenv("PROTECTED_PORTS","")) .split(',') if x.strip()])
-    sshp = os.getenv("SSH_PORT")
-    if sshp: pro.add(str(sshp))
-    return str(port) in pro
-
-def parse_scope(parts):
-    servers, groups = set(), set()
-    for t in parts:
-        if not t.startswith("@") or "=" not in t: continue
-        k,v = t[1:].split("=",1)
-        vals = [x.strip() for x in v.split(",") if x.strip()]
-        if k in ("server","servers"): servers.update(vals)
-        elif k in ("group","groups"): groups.update(vals)
-    return {"servers": servers, "groups": groups}
-
-def scope_matches(scope):
-    if not scope["servers"] and not scope["groups"]:
-        return True
-    if SERVER_ID in scope["servers"]:
-        return True
-    if SERVER_GROUPS:
-        if set(SERVER_GROUPS).intersection(scope["groups"]):
-            return True
-    return False
-
-def key_server(base, sid):
-    return f"{base}:server:{sid}"
-
-def key_group(base, gid):
-    return f"{base}:group:{gid}"
-def sync_all(r):
-    ensure_sets()
-    try_sh(f"ipset flush {SET_BLACK_IPS}")
-    try_sh(f"ipset flush {SET_BLOCK_PORTS}")
-    try_sh(f"ipset flush {SET_ALLOW_PORTS}")
-    try_sh(f"ipset flush {SET_ALLOW_IPPORTS}")
-    try_sh(f"ipset flush {SET_BLOCK_IPPORTS}")
-    # ---- BLACK IPs (global + scoped) ----
-    def load_blackips():
-        for ip in r.smembers(K_BLACK_IPS):
-            yield ip
-        for ip in r.smembers(key_server(K_BLACK_IPS, SERVER_ID)):
-            yield ip
-        for g in SERVER_GROUPS:
-            for ip in r.smembers(key_group(K_BLACK_IPS, g)):
-                yield ip
-    for ip in load_blackips():
-        try_sh(f"ipset add {SET_BLACK_IPS} {ip} -exist")
-
-    # ---- BLOCK PORTS (global + scoped) ----
-    def load_blkports():
-        for p in r.smembers(K_BLOCK_PORTS):
-            yield p
-        for p in r.smembers(key_server(K_BLOCK_PORTS, SERVER_ID)):
-            yield p
-        for g in SERVER_GROUPS:
-            for p in r.smembers(key_group(K_BLOCK_PORTS, g)):
-                yield p
-    for p in load_blkports():
-        try_sh(f"ipset add {SET_BLOCK_PORTS} {p} -exist")
-
-    # ---- ALLOW PORTS (global + scoped, protected guard) ----
-    def load_alwports():
-        for p in r.smembers(K_ALLOW_PORTS):
-            yield p
-        for p in r.smembers(key_server(K_ALLOW_PORTS, SERVER_ID)):
-            yield p
-        for g in SERVER_GROUPS:
-            for p in r.smembers(key_group(K_ALLOW_PORTS, g)):
-                yield p
-    for p in load_alwports():
-        if is_protected_port(p) and os.getenv("ALLOW_PROTECTED_PORTS","") not in ("1","true","TRUE","yes","YES"):
-            _log("WARN", f"skip protected allow_port tcp:{p} (sync)")
-            continue
-        try_sh(f"ipset add {SET_ALLOW_PORTS} {p} -exist")
-
-    # ---- ALLOW/BLOCK IP:PORT (global + scoped) ----
-    def load_ipports(base):
-        for s in r.smembers(base):
-            yield s
-        for s in r.smembers(key_server(base, SERVER_ID)):
-            yield s
-        for g in SERVER_GROUPS:
-            for s in r.smembers(key_group(base, g)):
-                yield s
-    for s in load_ipports(K_ALLOW_IPPORTS):
-        if ":" in s:
-            ip,p = s.split(":",1)
-            # allow_ipport는 보호 포트라도 sync 시에는 안전상 무시
-            if is_protected_port(p) and os.getenv("ALLOW_PROTECTED_PORTS","") not in ("1","true","TRUE","yes","YES"):
-                _log("WARN", f"skip protected allow_ipport {ip},tcp:{p} (sync)")
-                continue
-            add_ipport(SET_ALLOW_IPPORTS, ip, p)
-    for s in load_ipports(K_BLOCK_IPPORTS):
-        if ":" in s:
-            ip,p = s.split(":",1)
-            add_ipport(SET_BLOCK_IPPORTS, ip, p)
-def handle(tokens):
-    op=tokens[0]
-    # scope check
-    scope = parse_scope(tokens)
-    if not scope_matches(scope):
-        return
-    force = has_flag(tokens, "force")
-    if op=="allow_ipport" and len(tokens)>=3: add_ipport(SET_ALLOW_IPPORTS,tokens[1],tokens[2])
-    elif op=="unallow_ipport" and len(tokens)>=3: del_ipport(SET_ALLOW_IPPORTS,tokens[1],tokens[2])
-    elif op=="block_ipport" and len(tokens)>=3: add_ipport(SET_BLOCK_IPPORTS,tokens[1],tokens[2])
-    elif op=="unblock_ipport" and len(tokens)>=3: del_ipport(SET_BLOCK_IPPORTS,tokens[1],tokens[2])
-    elif op=="ban_ip" and len(tokens)>=2: try_sh(f"ipset add {SET_BLACK_IPS} {tokens[1]} -exist")
-    elif op=="unban_ip" and len(tokens)>=2: try_sh(f"ipset del {SET_BLACK_IPS} {tokens[1]} -exist")
-    elif op=="block_port" and len(tokens)>=2: try_sh(f"ipset add {SET_BLOCK_PORTS} {tokens[1]} -exist")
-    elif op=="unblock_port" and len(tokens)>=2: try_sh(f"ipset del {SET_BLOCK_PORTS} {tokens[1]} -exist")
-    elif op=="allow_port" and len(tokens)>=2:
-        p=tokens[1]
-        if is_protected_port(p) and not force and os.getenv("ALLOW_PROTECTED_PORTS","") not in ("1","true","TRUE","yes","YES"):
-            _log("WARN", f"skip protected allow_port {p}")
-        else:
-            try_sh(f"ipset add {SET_ALLOW_PORTS} {p} -exist")
-    elif op=="unallow_port" and len(tokens)>=2:
-        try_sh(f"ipset del {SET_ALLOW_PORTS} {tokens[1]} -exist")
-def main():
-    import redis
-    r=redis.StrictRedis(host=REDIS_HOST,port=REDIS_PORT,db=REDIS_DB,password=REDIS_PASS,decode_responses=True)
-    ensure_sets(); sync_all(r)
-    ps=r.pubsub(); ps.subscribe(CHANNEL)
-    _log("INFO",f"SERVER_ID={SERVER_ID} subscribed {CHANNEL}")
-    for m in ps.listen():
-        if m.get("type")!="message": continue
-        t=m.get("data").split(); 
-        if not t: continue
-        try: handle(t)
-        except Exception as e: _log("ERROR",f"cmd error: {e}")
-if __name__=="__main__": main()
-PYEOF
-chmod +x "$AGENT"
-fi
+## 내장 에이전트 코드 블록 제거됨(원격 다운로드 방식 사용)
 
 ### 4) 환경 파일(다운로드/패치 완료) — 별도 생성 생략
 umask 077
