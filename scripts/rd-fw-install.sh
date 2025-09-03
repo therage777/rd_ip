@@ -195,7 +195,10 @@ fetch "$SRC_BASE/redis-fw-agent.conf" "$CONF" "$PIN_SHA_CONF"; chmod 600 "$CONF"
 sed -i -E "s|^REDIS_HOST=.*|REDIS_HOST=$REDIS_HOST|" "$CONF"
 sed -i -E "s|^REDIS_PORT=.*|REDIS_PORT=$REDIS_PORT|" "$CONF"
 sed -i -E "s|^REDIS_DB=.*|REDIS_DB=$REDIS_DB|" "$CONF"
-sed -i -E "s|^REDIS_PASS=.*|REDIS_PASS=$REDIS_PASS|" "$CONF"
+# REDIS_PASS는 특수문자가 포함될 수 있어 안전하게 작은따옴표로 감싼다.
+# sed 치환 텍스트에서 & 는 특수 의미가 있으므로 이스케이프 처리한다.
+_PASS_ESC_FOR_SED=$(printf '%s' "$REDIS_PASS" | sed -e "s/'/'\\''/g" -e 's/[&]/\\\&/g')
+sed -i -E "s|^REDIS_PASS=.*|REDIS_PASS='${_PASS_ESC_FOR_SED}'|" "$CONF"
 sed -i -E "s|^FW_CHANNEL=.*|FW_CHANNEL=$FW_CHANNEL|" "$CONF"
 sed -i -E "s|^SSH_PORT=.*|SSH_PORT=$SSH_PORT|" "$CONF"
 sed -i -E "s|^EMERGENCY_SSH_CIDR=.*|EMERGENCY_SSH_CIDR=$EMERGENCY_SSH_CIDR|" "$CONF"
@@ -285,5 +288,12 @@ systemctl enable redis-fw-agent
 systemctl restart redis-fw-agent
 
 echo "[OK] 설치 완료"
-echo "- Ubuntu: UFW 체인에 ipset 삽입 완료"
-echo "- CentOS7: Vault 레포 자동 전환 + iptables 규칙 반영 완료"
+if [[ $OS_FAMILY == ubuntu ]]; then
+  echo "- Ubuntu: UFW 체인에 ipset 삽입 완료"
+elif [[ $OS_FAMILY == el7 ]]; then
+  echo "- CentOS 7: Vault 레포 자동 전환 + iptables 규칙 반영 완료"
+elif [[ $OS_FAMILY == el6 ]]; then
+  echo "- CentOS 6: iptables 규칙 반영 완료"
+else
+  echo "- iptables 규칙 반영 완료"
+fi
